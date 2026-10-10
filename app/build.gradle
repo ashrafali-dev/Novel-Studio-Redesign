@@ -32,10 +32,9 @@ android {
 
     buildTypes {
         release {
-            if (!releaseKeystore || !releaseStorePassword || !releaseKeyAlias || !releaseKeyPassword) {
-                throw new GradleException("Release signing is not configured. Add KEYSTORE_FILE, KEYSTORE_PASSWORD, KEY_ALIAS and KEY_PASSWORD.")
+            if (releaseKeystore && releaseStorePassword && releaseKeyAlias && releaseKeyPassword) {
+                signingConfig signingConfigs.release
             }
-            signingConfig signingConfigs.release
             minifyEnabled false
         }
     }

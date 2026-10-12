@@ -384,18 +384,6 @@ class MainActivity : Activity() {
 
     private lateinit var ratioLabel: TextView
 
-    private fun buildProviderChips() {
-        providerRow.removeAllViews()
-        providerUrls.keys.forEach { provider ->
-            val selected = activeProvider == provider
-            providerRow.addView(pill(provider, selected = selected) {
-                activeProvider = provider
-                buildProviderChips()
-                loadChatbot(providerUrls[provider]!!)
-            }, LinearLayout.LayoutParams(-2, dp(31)).apply { rightMargin = dp(5) })
-        }
-    }
-
     private fun WebView.configureWebView() {
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true

@@ -7,5 +7,5 @@ dependencyResolutionManagement {
         maven { url = uri("https://maven.mozilla.org/maven2/") }
     }
 }
-rootProject.name = "NovelStudioNext"
+rootProject.name = "NovelStudioRedesign"
 include(":app")

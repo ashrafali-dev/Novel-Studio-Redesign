@@ -55,6 +55,7 @@ class MainActivity : Activity() {
     private var activeProvider = "ChatGPT"
     private val core = NovelStudioCore()
     private val completedTranslations = mutableMapOf<String, String>()
+    private val translationTasks = linkedMapOf<String, TranslationTask>()
     private val prefs by lazy { getPreferences(Context.MODE_PRIVATE) }
     private val defaultPrompt = "Translate the following novel chapter into natural, fluent literary Bengali. Preserve meaning, names, titles, dialogue, paragraph structure, tone, emotions, humor and pacing. Do not summarize or omit anything. Output only the Bengali translation."
 
@@ -113,6 +114,17 @@ class MainActivity : Activity() {
                     }
                     val fingerprint = chapterFingerprint(title, text)
                     val previous = core.currentJob
+                    val cached = completedTranslations[fingerprint]
+                    if (cached != null) {
+                        val cachedJob = core.beginJob(url)
+                        core.setExtracted(cachedJob.id, title, text, fingerprint)
+                        core.markCompleted(cachedJob.id, cached)
+                        lastInsertedJobId = cachedJob.id
+                        setTranslationProgress(100, "Chapter " + chapterLabel(title) + " · Saved")
+                        updateTrackedTask(fingerprint, title, "COMPLETE", 100)
+                        injectTranslation(sourceView, url, cached)
+                        return@runOnUiThread
+                    }
                     if (nextPending && nextPendingWebView === sourceView && nextOriginFingerprint.isNotBlank() &&
                         fingerprint == nextOriginFingerprint
                     ) {
@@ -175,6 +187,7 @@ class MainActivity : Activity() {
                 core.saveTranslation(job.chapterUrl, cleaned)
                 lastInsertedJobId = job.id
                 completedTranslations[job.fingerprint] = cleaned
+                updateTrackedTask(job.fingerprint, job.title, "COMPLETE", 100)
                 setTranslationProgress(100, "Chapter " + chapterLabel(job.title) + " · Complete")
                 translationPollJobId = null
                 translationBaselineJobId = null
@@ -203,59 +216,26 @@ class MainActivity : Activity() {
     private fun buildUi() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), dp(5), dp(12), dp(7))
+            setPadding(dp(10), dp(5), dp(10), dp(5))
             setBackgroundColor(CANVAS)
         }
 
-        val header = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(2), 0, dp(7))
-        }
-        val logo = TextView(this).apply {
-            text = "N"
-            textSize = 21f
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
-            background = rounded(ACCENT, 13)
-            layoutParams = LinearLayout.LayoutParams(dp(40), dp(40))
-        }
-        header.addView(logo)
-        val titleBox = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(10), 0, 0, 0)
-        }
-        titleBox.addView(TextView(this).apply {
-            text = "NovelStudio"
-            textSize = 19f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(TEXT)
-        })
-        titleBox.addView(TextView(this).apply {
-            text = "READ  ·  TRANSLATE  ·  CONTINUE"
-            textSize = 9f
-            letterSpacing = 0.08f
-            setTextColor(MUTED)
-        })
-        header.addView(titleBox, LinearLayout.LayoutParams(0, -2, 1f))
-        header.addView(pill("⋮", minWidth = 42) { showMoreMenu() })
-        root.addView(header, matchWrap())
-
+        // Keep the reader workspace clean. Secondary controls live in ⋮.
         val addressRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
+        addressRow.addView(pill("‹", minWidth = 34, minHeight = 42) { activeWebView()?.goBack() })
         addressBar = EditText(this).apply {
-            hint = "Novel URL অথবা search"
+            hint = "Novel URL"
             setSingleLine(true)
             textSize = 13f
             setTextColor(TEXT)
             setHintTextColor(MUTED)
             imeOptions = EditorInfo.IME_ACTION_GO
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
-            setPadding(dp(13), 0, dp(10), 0)
-            background = rounded(SURFACE, 14, BORDER)
+            setPadding(dp(12), 0, dp(8), 0)
+            background = rounded(SURFACE, 13, BORDER)
             setOnEditorActionListener { _, action, _ ->
                 if (action == EditorInfo.IME_ACTION_GO || action == EditorInfo.IME_ACTION_DONE) {
                     navigate(text.toString())
@@ -263,32 +243,23 @@ class MainActivity : Activity() {
                 } else false
             }
         }
-        addressRow.addView(addressBar, LinearLayout.LayoutParams(0, dp(44), 1f))
-        addressRow.addView(pill("Open ↗", primary = true) { navigate(addressBar.text.toString()) }.apply {
-            setPadding(dp(14), 0, dp(14), 0)
-        }, LinearLayout.LayoutParams(-2, dp(44)).apply { leftMargin = dp(7) })
-        root.addView(addressRow, matchWrap())
-
-        // Site shortcuts are intentionally hidden from the reader workspace; use More → Site profiles.
-        val compactTools = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        compactTools.addView(pill("‹", minWidth = 38) { activeWebView()?.goBack() }, weightButton())
-        compactTools.addView(pill("›", minWidth = 38) { activeWebView()?.goForward() }, weightButton())
-        compactTools.addView(pill("↻", minWidth = 38) { activeWebView()?.reload() }, weightButton())
-        compactTools.addView(pill("Tabs", minWidth = 58) { showTabs() }, weightButton())
-        compactTools.addView(pill("Split", selected = splitEnabled, minWidth = 58) { toggleSplit() }, weightButton())
-        root.addView(compactTools, LinearLayout.LayoutParams(-1, dp(32)).apply { bottomMargin = dp(2) })
+        addressRow.addView(addressBar, LinearLayout.LayoutParams(0, dp(42), 1f).apply { leftMargin = dp(5) })
+        addressRow.addView(pill("Go", primary = true, minWidth = 42, minHeight = 42) {
+            navigate(addressBar.text.toString())
+        }, LinearLayout.LayoutParams(-2, dp(42)).apply { leftMargin = dp(5) })
+        addressRow.addView(pill("⋮", minWidth = 40, minHeight = 42) {
+            showMoreMenu()
+        }, LinearLayout.LayoutParams(-2, dp(42)).apply { leftMargin = dp(5) })
+        root.addView(addressRow, LinearLayout.LayoutParams(-1, dp(44)))
 
         val tabScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
-            setPadding(0, 0, 0, dp(2))
+            setPadding(0, dp(1), 0, dp(2))
         }
         tabBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         tabScroll.addView(tabBar)
-        root.addView(tabScroll, LinearLayout.LayoutParams(-1, dp(28)))
-        
+        root.addView(tabScroll, LinearLayout.LayoutParams(-1, dp(29)))
+
         val workspace = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             clipChildren = false
@@ -299,21 +270,6 @@ class MainActivity : Activity() {
             background = rounded(PANEL, 18, BORDER)
             clipToOutline = true
         }
-        val readerHeader = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), 0, dp(8), 0)
-        }
-        readerHeader.addView(dot(ACCENT))
-        readerHeader.addView(TextView(this).apply {
-            text = "  NOVEL READER"
-            textSize = 10f
-            typeface = Typeface.DEFAULT_BOLD
-            letterSpacing = 0.07f
-            setTextColor(TEXT)
-        }, LinearLayout.LayoutParams(0, dp(37), 1f))
-        readerHeader.addView(pill("⛶", minWidth = 36) { toggleReaderFocus() })
-        browserPanel.addView(readerHeader, matchWrap())
         browserHost = FrameHost(this)
         browserPanel.addView(browserHost, LinearLayout.LayoutParams(-1, 0, 1f))
         workspace.addView(browserPanel, LinearLayout.LayoutParams(-1, 0, splitRatio.toFloat()))
@@ -326,7 +282,7 @@ class MainActivity : Activity() {
         splitDivider.addView(TextView(this).apply {
             text = "READER / AI"
             textSize = 8f
-            letterSpacing = 0.08f
+            letterSpacing = 0.06f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(MUTED)
         })
@@ -344,44 +300,20 @@ class MainActivity : Activity() {
                 override fun onStopTrackingTouch(seek: SeekBar?) = Unit
             })
         }
-        splitDivider.addView(splitBar, LinearLayout.LayoutParams(0, dp(26), 1f))
+        splitDivider.addView(splitBar, LinearLayout.LayoutParams(0, dp(22), 1f))
         splitDivider.addView(TextView(this).apply {
             text = splitRatio.toString() + "%"
             textSize = 9f
             setTextColor(MUTED)
             gravity = Gravity.CENTER
         }.also { ratioLabel = it }, LinearLayout.LayoutParams(dp(34), -1))
-        workspace.addView(splitDivider, LinearLayout.LayoutParams(-1, dp(28)))
+        workspace.addView(splitDivider, LinearLayout.LayoutParams(-1, dp(24)))
 
         chatPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = rounded(PANEL, 18, BORDER)
             clipToOutline = true
         }
-        val aiHeader = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), 0, dp(8), 0)
-        }
-        aiHeader.addView(dot(GREEN))
-        aiHeader.addView(TextView(this).apply {
-            text = "  AI TRANSLATOR"
-            textSize = 10f
-            typeface = Typeface.DEFAULT_BOLD
-            letterSpacing = 0.07f
-            setTextColor(TEXT)
-        }, LinearLayout.LayoutParams(0, dp(35), 1f))
-        aiHeader.addView(pill("Reload", minWidth = 54) { chatbot.reload() })
-        chatPanel.addView(aiHeader, matchWrap())
-
-        val providerScroll = HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-            setPadding(dp(9), dp(1), dp(9), dp(6))
-        }
-        providerRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        providerScroll.addView(providerRow)
-        chatPanel.addView(providerScroll, matchWrap())
-
         chatbot = WebView(this).apply {
             configureWebView()
             addJavascriptInterface(aiBridge, "NovelStudioAI")
@@ -395,38 +327,25 @@ class MainActivity : Activity() {
         workspace.addView(chatPanel, LinearLayout.LayoutParams(-1, 0, (100 - splitRatio).toFloat()))
         root.addView(workspace, LinearLayout.LayoutParams(-1, 0, 1f))
 
-        buildProviderChips()
         chatbot.loadUrl(providerUrls[activeProvider]!!)
         updateSplitWeights()
 
         val actionsCard = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            background = rounded(SURFACE, 14, BORDER)
+            background = rounded(SURFACE, 13, BORDER)
             setPadding(dp(3), dp(3), dp(3), dp(3))
         }
-        actionsCard.addView(pill(if (autoWorkflowEnabled) "AUTO ON" else "AUTO OFF", primary = autoWorkflowEnabled, minHeight = 39) {
+        actionsCard.addView(pill(if (autoWorkflowEnabled) "AUTO ON" else "AUTO OFF",
+            primary = autoWorkflowEnabled, minHeight = 38) {
             autoWorkflowEnabled = !autoWorkflowEnabled
-            toast(if (autoWorkflowEnabled) "AUTO: Extract → Send → Wait → Insert → Next" else "AUTO বন্ধ")
-        }, LinearLayout.LayoutParams(0, dp(39), 1.1f).apply { rightMargin = dp(3) })
-        actionsCard.addView(pill("Next ›", minHeight = 39) { nextChapter() }, LinearLayout.LayoutParams(0, dp(39), .9f).apply { rightMargin = dp(3) })
-        actionsCard.addView(pill("Copy", minHeight = 39) { copyContent() }, LinearLayout.LayoutParams(0, dp(39), .75f))
-        root.addView(actionsCard, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(7) })
-
-        val promptRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            background = rounded(SURFACE, 12, BORDER)
-            setPadding(dp(8), 0, dp(5), 0)
-        }
-        promptRow.addView(TextView(this).apply {
-            text = "PROMPT"
-            textSize = 9f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(MUTED)
-        }, LinearLayout.LayoutParams(0, dp(32), 1f))
-        promptRow.addView(pill("Edit", minWidth = 52, minHeight = 28) { showPromptEditor() })
-        root.addView(promptRow, LinearLayout.LayoutParams(-1, dp(34)).apply { topMargin = dp(5) })
+            toast(if (autoWorkflowEnabled) "AUTO: Extract → Send → Wait → Insert" else "AUTO বন্ধ")
+        }, LinearLayout.LayoutParams(0, dp(38), 1.1f).apply { rightMargin = dp(3) })
+        actionsCard.addView(pill("Next ›", minHeight = 38) { nextChapter() },
+            LinearLayout.LayoutParams(0, dp(38), .9f).apply { rightMargin = dp(3) })
+        actionsCard.addView(pill("Track", minHeight = 38) { showTranslationTracker() },
+            LinearLayout.LayoutParams(0, dp(38), .8f))
+        root.addView(actionsCard, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(5) })
 
         val progressRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -439,29 +358,29 @@ class MainActivity : Activity() {
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
         }
-        progressRow.addView(progressLabel, LinearLayout.LayoutParams(dp(150), dp(24)))
+        progressRow.addView(progressLabel, LinearLayout.LayoutParams(dp(170), dp(22)))
         progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
             progress = 0
             progressTintList = android.content.res.ColorStateList.valueOf(ACCENT)
             progressBackgroundTintList = android.content.res.ColorStateList.valueOf(BORDER)
         }
-        progressRow.addView(progressBar, LinearLayout.LayoutParams(0, dp(8), 1f).apply { leftMargin = dp(6) })
-        root.addView(progressRow, LinearLayout.LayoutParams(-1, dp(28)))
+        progressRow.addView(progressBar, LinearLayout.LayoutParams(0, dp(7), 1f).apply { leftMargin = dp(5) })
+        root.addView(progressRow, LinearLayout.LayoutParams(-1, dp(23)))
 
         statusText = TextView(this).apply {
             text = "AUTO ON · Open a chapter → extract → send → translate → insert"
-            textSize = 10f
+            textSize = 9f
             setTextColor(MUTED)
             gravity = Gravity.CENTER_VERTICAL
-            maxLines = 2
-            setPadding(dp(5), 0, dp(5), 0)
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(dp(4), 0, dp(4), 0)
         }
-        root.addView(statusText, matchWrap())
+        root.addView(statusText, LinearLayout.LayoutParams(-1, dp(18)))
         setContentView(root)
     }
 
-    private lateinit var providerRow: LinearLayout
     private lateinit var ratioLabel: TextView
 
     private fun buildProviderChips() {
@@ -614,7 +533,7 @@ class MainActivity : Activity() {
     private fun injectTranslationPrompt() {
         val job = core.currentJob ?: return
         if (translationSendJobId != job.id || job.extractedText.isBlank()) return
-        val prompt = "Translate the following novel chapter into natural, fluent literary Bengali. Preserve meaning, names, titles, dialogue, paragraph structure, tone, emotions, humor and pacing. Do not summarize or omit anything. Output only the Bengali translation, with no introduction or explanation.\n\n" + job.extractedText
+        val prompt = getSavedPrompt().trim().ifBlank { defaultPrompt } + "\n\n" + job.extractedText
         chatbot.evaluateJavascript(ProviderHandlers.responseSnapshotScript(chatbot.url.orEmpty())) { raw ->
             if (!core.isCurrentJob(job.id) || !core.translationRequested) return@evaluateJavascript
             val baseline = parseSnapshot(raw)
@@ -634,6 +553,7 @@ class MainActivity : Activity() {
                     return@evaluateJavascript
                 }
                 setTranslationProgress(65, "Chapter " + chapterLabel(job.title) + " · Translating")
+                updateTrackedTask(job.fingerprint, job.title, "TRANSLATING", 65)
                 setStatus("TRANSLATING · AI response-এর জন্য অপেক্ষা")
                 scheduleAiResponsePolling(job.id)
             }
@@ -652,6 +572,11 @@ class MainActivity : Activity() {
                 chatbot.evaluateJavascript(ProviderHandlers.responseSnapshotScript(chatbot.url.orEmpty())) { raw ->
                     if (!core.isCurrentJob(id) || !core.translationRequested) return@evaluateJavascript
                     val snapshot = parseSnapshot(raw)
+                    if (snapshot.text.isNotBlank()) {
+                        val live = (65 + (snapshot.text.length.coerceAtMost(12000) * 28 / 12000)).coerceIn(65, 93)
+                        setTranslationProgress(live, "Chapter " + chapterLabel(core.currentJob?.title.orEmpty()) + " · Translating " + live + "%")
+                        core.currentJob?.let { updateTrackedTask(it.fingerprint, it.title, "TRANSLATING", live) }
+                    }
                     val hasNewResponse = translationBaselineJobId == id &&
                         snapshot.text.length >= 40 &&
                         snapshot.text != translationBaseline &&
@@ -838,6 +763,8 @@ class MainActivity : Activity() {
         addressBar.setText(tabs[index].webView.url ?: tabs[index].lastUrl)
         renderTabs()
         setStatus("TAB " + (index + 1) + " · " + Uri.parse(tabs[index].webView.url ?: tabs[index].lastUrl).host.orEmpty())
+        val view = tabs[index].webView
+        view.postDelayed({ if (view === activeWebView()) extractFrom(view) }, 250)
     }
 
     private fun closeActiveTab() = closeTabAt(activeTab)
@@ -955,26 +882,68 @@ class MainActivity : Activity() {
 
     private fun showMoreMenu() {
         val items = arrayOf(
+            "Back",
+            "Forward",
+            "Reload page",
+            "AI provider: " + activeProvider,
             "Edit translation prompt",
-            "Novel site profiles",
+            "Translation tracker",
+            "Site profiles",
+            "Split view: " + if (splitEnabled) "ON" else "OFF",
             "Ad blocker: " + if (adBlockEnabled) "ON" else "OFF",
-            "Reload current AI",
             "About NovelStudio"
         )
-        AlertDialog.Builder(this).setTitle("NovelStudio tools").setItems(items) { _, which ->
+        AlertDialog.Builder(this).setTitle("NovelStudio").setItems(items) { _, which ->
             when (which) {
-                0 -> showPromptEditor()
-                1 -> showSiteProfiles()
-                2 -> {
+                0 -> activeWebView()?.goBack()
+                1 -> activeWebView()?.goForward()
+                2 -> activeWebView()?.reload()
+                3 -> showProviderMenu()
+                4 -> showPromptEditor()
+                5 -> showTranslationTracker()
+                6 -> showSiteProfiles()
+                7 -> toggleSplit()
+                8 -> {
                     adBlockEnabled = !adBlockEnabled
                     toast("Ad blocker " + (if (adBlockEnabled) "ON" else "OFF") + " · page reload কর")
                 }
-                3 -> chatbot.reload()
-                4 -> AlertDialog.Builder(this).setTitle("NovelStudio Redesign")
-                    .setMessage("Novel reader + AI translation workspace. Extract → Translate → insert under the original chapter → Next auto-extracts the next chapter. Site selectors vary by website.")
+                9 -> AlertDialog.Builder(this).setTitle("NovelStudio Redesign")
+                    .setMessage("Novel reader + AI translation workspace.")
                     .setPositiveButton("OK", null).show()
             }
         }.show()
+    }
+
+    private fun showProviderMenu() {
+        val providers = providerUrls.keys.toTypedArray()
+        AlertDialog.Builder(this).setTitle("AI provider").setItems(providers) { _, which ->
+            activeProvider = providers[which]
+            loadChatbot(providerUrls[activeProvider]!!)
+        }.show()
+    }
+
+    private fun showTranslationTracker() {
+        val tasks = translationTasks.values.toList().asReversed()
+        val items = if (tasks.isEmpty()) arrayOf("No translation jobs yet")
+        else tasks.map { "Chapter " + chapterLabel(it.title) + " · " + it.status + " · " + it.progress + "%" }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Translation tracker")
+            .setItems(items) { _, which ->
+                if (tasks.isNotEmpty() && which < tasks.size) {
+                    val task = tasks[which]
+                    completedTranslations[task.fingerprint]?.let { cached ->
+                        val target = activeWebView()
+                        if (target != null) injectTranslation(target, target.url.orEmpty(), cached)
+                    }
+                }
+            }
+            .setPositiveButton("Close", null)
+            .show()
+    }
+
+    private fun updateTrackedTask(fingerprint: String, title: String, status: String, progress: Int) {
+        if (fingerprint.isBlank()) return
+        translationTasks[fingerprint] = TranslationTask(fingerprint, title, status, progress.coerceIn(0, 100))
     }
 
     private fun showSiteProfiles() {
@@ -1059,6 +1028,12 @@ class MainActivity : Activity() {
     private data class BrowserTab(val webView: WebView, var lastUrl: String)
     private data class SiteShortcut(val label: String, val url: String)
     private data class ResponseSnapshot(val count: Int, val text: String, val streaming: Boolean)
+    private data class TranslationTask(
+        val fingerprint: String,
+        val title: String,
+        val status: String,
+        val progress: Int
+    )
 
     private class FrameHost(activity: Activity) : LinearLayout(activity) {
         init {

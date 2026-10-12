@@ -20,5 +20,6 @@ android {
     buildTypes { release { minifyEnabled false } }
 }
 dependencies {
-    implementation 'org.mozilla.geckoview:geckoview-stable:157.0.20261005135250'
+    // Use a published stable build from the GeckoView ESR 140 line.
+    implementation 'org.mozilla.geckoview:geckoview-stable:140.+'
 }

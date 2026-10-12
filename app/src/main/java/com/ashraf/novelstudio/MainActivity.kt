@@ -157,6 +157,7 @@ class MainActivity : Activity() {
                     nextFingerprintRetries = 0
                     val job = core.beginJob(url)
                     core.setExtracted(job.id, title, text, fingerprint)
+                    updateTrackedTask(fingerprint, title, "EXTRACTED", 25)
                     setTranslationProgress(25, "Chapter " + chapterLabel(title) + " · Extracted")
                     setStatus("EXTRACTED · " + text.length + " characters · ready to translate")
                     toast("Chapter extracted")
@@ -526,6 +527,8 @@ class MainActivity : Activity() {
         }
         if (!core.markTranslationRequested(job.id)) return
         translationSendJobId = job.id
+        updateTrackedTask(job.fingerprint, job.title, "SENDING", 40)
+        setTranslationProgress(40, "Chapter " + chapterLabel(job.title) + " · Sending")
         setStatus("SENDING · chapter পাঠানো হচ্ছে " + activeProvider + "-এ")
         injectTranslationPrompt()
     }

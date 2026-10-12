@@ -274,6 +274,14 @@ class MainActivity : Activity() {
         compactTools.addView(pill("Tabs", minWidth = 58) { showTabs() }, weightButton())
         compactTools.addView(pill("Split", selected = splitEnabled, minWidth = 58) { toggleSplit() }, weightButton())
         root.addView(compactTools, LinearLayout.LayoutParams(-1, dp(32)).apply { bottomMargin = dp(2) })
+        val tabScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            setPadding(0, 0, 0, dp(2))
+        }
+        tabBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        tabScroll.addView(tabBar)
+        root.addView(tabScroll, LinearLayout.LayoutParams(-1, dp(28)))
+        
         val workspace = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             clipChildren = false

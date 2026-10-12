@@ -60,6 +60,7 @@ class MainActivity : Activity() {
     private var lastPolledCandidate = ""
     private var stableCandidatePolls = 0
 
+    private var autoTranslateOnNext = false
     private var nextPending = false
     private var nextOriginUrl = ""
     private var nextPendingWebView: WebView? = null
@@ -109,6 +110,15 @@ class MainActivity : Activity() {
                     core.setExtracted(job.id, title, text)
                     setStatus("EXTRACTED · " + text.length + " characters · ready to translate")
                     toast("Chapter extracted")
+                    if (autoTranslateOnNext) {
+                        autoTranslateOnNext = false
+                        sourceView.postDelayed({
+                            if (sourceView === activeWebView() && core.isCurrentJob(job.id)) {
+                                setStatus("NEXT CHAPTER · auto-translation starting")
+                                startTranslation()
+                            }
+                        }, 650)
+                    }
                 }
             }
         }
@@ -128,6 +138,8 @@ class MainActivity : Activity() {
                         setStatus("Chapter route changed · refreshing page hooks")
                         if (nextPending && nextPendingWebView === sourceView && url != nextOriginUrl) {
                             scheduleNextChapterExtraction(sourceView)
+                        } else if (!nextPending) {
+                            autoTranslateOnNext = false
                         }
                     }
                 }
@@ -658,6 +670,9 @@ class MainActivity : Activity() {
     private fun nextChapter() {
         val view = activeWebView() ?: return
         val profile = SiteProfiles.forUrl(view.url.orEmpty())
+        autoTranslateOnNext = core.currentJob?.let {
+            it.status == NovelStudioCore.Status.COMPLETED && it.translation.isNotBlank()
+        } == true
         core.invalidateCurrentJob()
         resetTranslationTracking()
         nextPending = true
@@ -679,6 +694,7 @@ class MainActivity : Activity() {
             } else {
                 nextPending = false
                 nextPendingWebView = null
+                autoTranslateOnNext = false
                 setStatus("NEXT NOT FOUND · এই site-এর selector/profile উন্নত করতে হবে")
                 toast("Next chapter link পাওয়া যায়নি")
             }

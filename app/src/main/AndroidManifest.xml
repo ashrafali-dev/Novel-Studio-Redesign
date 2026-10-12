@@ -1,20 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-
     <uses-permission android:name="android.permission.INTERNET" />
-
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <application
-        android:label="Novel Studio"
-        android:icon="@mipmap/novel_studio_icon"
-        android:roundIcon="@mipmap/novel_studio_icon"
-        android:usesCleartextTraffic="true"
+        android:allowBackup="true"
+        android:label="NovelStudio Next"
+        android:usesCleartextTraffic="false"
         android:hardwareAccelerated="true"
-        android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
-
+        android:theme="@android:style/Theme.Material.NoActionBar">
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:launchMode="singleTask"
             android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout|uiMode"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
@@ -27,9 +23,5 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
-        <activity
-            android:name=".ReaderActivity"
-            android:exported="false"
-            android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout|uiMode" />
     </application>
 </manifest>

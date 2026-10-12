@@ -1,20 +1,27 @@
-# Novel Studio
+# NovelStudio Next
 
-APK বিল্ড: এই ফোল্ডার GitHub repo-তে আপলোড → Actions → "Build APK" → Artifacts থেকে app-debug.apk।
-(আপডেটের আগে ☰ → সব অনুবাদ txt এক্সপোর্ট করে রাখো — নতুন APK আগেরটার উপর বসবে না।)
+Clean rebuild of NovelStudio around Mozilla GeckoView for the main browser and a separate Android WebView for chatbot providers.
 
-⚡ অটো মোড (ডিফল্ট):
-- নোভেল সাইটে ▶ চাপলে পরের চ্যাপ্টার খোলে। সেভ করা অনুবাদ থাকলে সাথে সাথে সাইটেই বসে যায়।
-- না থাকলে ব্যাকগ্রাউন্ডে চ্যাটবটে পাঠিয়ে (আগে চ্যাটবটে লগইন থাকতে হবে), উত্তর শেষ হলে সাইটের লেখা রিপ্লেস করে বসায়। ওপরে পালস করা প্রোগ্রেস বার দেখায়।
-- ● বা 🌐 পিল = মূল ↔ অনুবাদ বদল। স্ক্রিন মোড (📖/💬/◫) কখনো নিজে বদলায় না।
-⚡ বন্ধ করলে কপি মোড: ▶ চাপলে চ্যাপ্টার ক্লিপবোর্ডে কপি হয়।
+## Included in this foundation
+- GeckoView main browser
+- URL/search bar and Back/Forward/Reload
+- Multiple in-memory tabs
+- Separate ChatGPT/Gemini chatbot WebView
+- Split-pane toggle and adjustable ratio
+- GeckoView WebExtension install/list entry points
+- Engine-independent chapter job state and translation cache boundary
 
----
+## Next milestones
+1. Build a WebExtension native-messaging bridge for DOM extraction and page insertion.
+2. Port site profiles and extraction rules from the original NovelStudio into adapters.
+3. Add provider-specific ChatGPT/Gemini/Claude/DeepSeek/Grok input and response handlers.
+4. Automate site-specific Next Chapter navigation and SPA route detection.
+5. Implement persistent history/bookmarks/downloads, private mode, permissions, and full extension controls.
+6. Run CI and device regression tests.
 
-## নতুন UI/UX (Redesign)
+## Build
+Open in Android Studio with JDK 17. The GitHub Actions workflow runs `gradle assembleDebug`.
+GeckoView is resolved from Mozilla's Maven repository. Official docs: https://mozilla.github.io/geckoview/consumer/docs/geckoview-quick-start
 
-- **মূল স্ক্রিন** (হেডার, অ্যাড্রেস বার, রাউন্ডেড প্যান, ড্র্যাগ করা যায় এমন স্প্লিট ডিভাইডার, আইকন+লেবেল টুলবার, প্রোগ্রেস কার্ড, ডার্ক/লাইট থিম) — `MainActivity.kt`-এর UI অংশে।
-- **ভিতরের পেজ ও শীট** (More, Library, Reader, Glossary, Bookmarks, History, Site settings, Queue, Ad block, Tabs, Settings, Inspector) — `app/src/assets/ui/overlay.html`। এটা একটা ওভারলে WebView, ডেটা আসে `UiBridge` (MainActivity.kt-এর শেষে) দিয়ে, যেটা আগের `Store/Prefs/Glossary/SiteRules` আর আগের ফাংশনগুলোই ডাকে।
-- আইকন: `app/src/main/res/drawable/ic_*.xml`
-- ইঞ্জিন (extract, queue, translate, polling, Js.kt, Extractor.kt ইত্যাদি) অপরিবর্তিত।
-- ☰ থেকে আগের পুরোনো মেনু (`menu()`) কোডে আছে, শুধু আর ডাকা হয় না।
+## Status
+This commit is the clean architectural foundation. It does not claim that every legacy feature has already been ported: the extraction bridge, auto-translation, site-specific Next Chapter actions, and full browser management remain to be implemented.

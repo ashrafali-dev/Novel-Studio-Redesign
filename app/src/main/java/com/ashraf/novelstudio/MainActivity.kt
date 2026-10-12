@@ -256,15 +256,7 @@ class MainActivity : Activity() {
         root.addView(addressRow, matchWrap())
 
         // Site shortcuts are intentionally hidden from the reader workspace; use More → Site profiles.
-        val navRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-        }
-        navRow.addView(pill("‹", minWidth = 42) { activeWebView()?.let { if (it.canGoBack()) it.goBack() } }, weightButton())
-        navRow.addView(pill("›", minWidth = 42) { activeWebView()?.let { if (it.canGoForward()) it.goForward() } }, weightButton())
-        navRow.addView(pill("↻", minWidth = 42) { activeWebView()?.reload() }, weightButton())
-        navRow.addView(pill("Tabs", selected = true) { showTabs() }, weightButton())
-        navRow.addView(pill(if        val compactTools = LinearLayout(this).apply {
+        val compactTools = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
@@ -274,6 +266,7 @@ class MainActivity : Activity() {
         compactTools.addView(pill("Tabs", minWidth = 58) { showTabs() }, weightButton())
         compactTools.addView(pill("Split", selected = splitEnabled, minWidth = 58) { toggleSplit() }, weightButton())
         root.addView(compactTools, LinearLayout.LayoutParams(-1, dp(32)).apply { bottomMargin = dp(2) })
+
         val tabScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             setPadding(0, 0, 0, dp(2))

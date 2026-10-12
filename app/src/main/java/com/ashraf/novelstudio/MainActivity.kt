@@ -268,7 +268,7 @@ class MainActivity : Activity() {
     }
 
     private fun showTabs(){
-        val items=tabs.mapIndexed{i,t->(if(i==activeTab)"● "else" )+"Tab "+(i+1)+" · "+t.lastUrl}.toMutableList();items.add("＋ New tab")
+        val items=tabs.mapIndexed{i,t->(if(i==activeTab)"● " else "")+"Tab "+(i+1)+" · "+t.lastUrl}.toMutableList();items.add("＋ New tab")
         AlertDialog.Builder(this).setTitle("Browser tabs").setItems(items.toTypedArray()){_,w->if(w==tabs.size)createTab("https://www.google.com")else selectTab(w)}.setNegativeButton("Close active tab"){_,_->closeActiveTab()}.show()
     }
     private fun selectTab(i:Int){if(i !in tabs.indices)return;activeTab=i;browserHost.show(tabs[i].webView);addressBar.setText(tabs[i].webView.url?:tabs[i].lastUrl);renderTabs()}

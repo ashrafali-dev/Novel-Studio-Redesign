@@ -42,6 +42,9 @@ class MainActivity : Activity() {
     private var splitEnabled = true
     private var splitRatio = 62
     private val core = NovelStudioCore()
+    private var translationSendJobId: Long? = null
+    private var translationPollJobId: Long? = null
+    private var lastInsertedJobId: Long? = null
 
     private val novelBridge = object {
         @JavascriptInterface
@@ -68,10 +71,13 @@ class MainActivity : Activity() {
             runOnUiThread {
                 val job = core.currentJob ?: return@runOnUiThread
                 if (!core.isCurrentJob(job.id)) return@runOnUiThread
+                if (lastInsertedJobId == job.id) return@runOnUiThread
                 val cleaned = text.trim()
                 if (cleaned.length < 40) return@runOnUiThread
                 core.saveTranslation(job.chapterUrl, cleaned)
                 core.markCompleted(job.id, cleaned)
+                lastInsertedJobId = job.id
+                translationPollJobId = null
                 injectTranslation(cleaned)
             }
         }
@@ -221,13 +227,19 @@ class MainActivity : Activity() {
     private fun startTranslation(){
         val job=core.currentJob
         if(job==null||job.extractedText.isBlank()){toast("আগে Extract চাপ");return}
-        core.markTranslationRequested(job.id)
-        statusText.text="Sending chapter to AI…"
+        if (translationSendJobId == job.id || job.status == NovelStudioCore.Status.COMPLETED) {
+            toast("এই chapter ইতিমধ্যে পাঠানো হয়েছে")
+            return
+        }
+        if (!core.markTranslationRequested(job.id)) return
+        translationSendJobId = job.id
+        statusText.text="Sending chapter to AI once…"
         injectTranslationPrompt()
     }
 
     private fun injectTranslationPrompt(){
         val job=core.currentJob?:return
+        if (translationSendJobId != job.id) return
         if(job.extractedText.isBlank())return
         val prompt="Translate the following novel chapter into natural, fluent literary Bengali. Preserve meaning, names, dialogue, paragraph structure, tone, emotions, humor and pacing. Do not summarize. Output only the Bengali translation.\n\n"+job.extractedText
         val escaped=JSONObject.quote(prompt)
@@ -237,11 +249,13 @@ class MainActivity : Activity() {
     }
 
     private fun scheduleAiResponsePolling(id:Long){
+        if (translationPollJobId == id) return
+        translationPollJobId = id
         chatbot.postDelayed(object:Runnable{
             override fun run(){
-                if(!core.isCurrentJob(id)||!core.translationRequested)return
+                if(!core.isCurrentJob(id)||!core.translationRequested){ if (translationPollJobId == id) translationPollJobId = null; return }
                 chatbot.evaluateJavascript("""(function(){var a=[];document.querySelectorAll('[data-message-author-role="assistant"],article,[class*="markdown"],[class*="response"]').forEach(function(e){var t=(e.innerText||e.textContent||'').trim();if(t.length>80)a.push(t);});if(a.length&&window.NovelStudioAI)NovelStudioAI.translationResult(a[a.length-1]);})();""",null)
-                if(core.isCurrentJob(id)&&core.translationRequested)chatbot.postDelayed(this,3000)
+                if(core.isCurrentJob(id)&&core.translationRequested)chatbot.postDelayed(this,2500) else if (translationPollJobId == id) translationPollJobId = null
             }
         },6000)
     }
@@ -256,8 +270,10 @@ class MainActivity : Activity() {
 
     private fun nextChapter(){
         core.invalidateCurrentJob()
+        translationSendJobId = null
+        translationPollJobId = null
         val selectors=SiteProfiles.nextSelectorJson()
-        activeWebView()?.evaluateJavascript("""(function(){var s=$selectors;for(var i=0;i<s.length;i++){var e=document.querySelector(s[i]);if(e){e.click();return true;}}return false;})()"""){r->statusText.text=if(r=="true")"Next chapter clicked" else "Next button not found"}
+        activeWebView()?.evaluateJavascript(ProviderHandlers.nextChapterScript(selectors)){r->statusText.text=if(r=="true")"Next chapter clicked" else "Next button not found"}
     }
 
     private fun copyChapter(){

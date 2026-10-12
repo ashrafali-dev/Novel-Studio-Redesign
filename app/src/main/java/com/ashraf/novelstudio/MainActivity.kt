@@ -25,6 +25,7 @@ import android.webkit.WebViewClient
 import android.widget.EditText
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
@@ -42,6 +43,8 @@ class MainActivity : Activity() {
     private lateinit var splitBar: SeekBar
     private lateinit var tabBar: LinearLayout
     private lateinit var statusText: TextView
+    private lateinit var progressBar: ProgressBar
+    private lateinit var progressLabel: TextView
     private lateinit var splitDivider: LinearLayout
 
     private val tabs = mutableListOf<BrowserTab>()
@@ -51,6 +54,9 @@ class MainActivity : Activity() {
     private var adBlockEnabled = true
     private var activeProvider = "ChatGPT"
     private val core = NovelStudioCore()
+    private val completedTranslations = mutableMapOf<String, String>()
+    private val prefs by lazy { getPreferences(Context.MODE_PRIVATE) }
+    private val defaultPrompt = "Translate the following novel chapter into natural, fluent literary Bengali. Preserve meaning, names, titles, dialogue, paragraph structure, tone, emotions, humor and pacing. Do not summarize or omit anything. Output only the Bengali translation."
 
     private var translationSendJobId: Long? = null
     private var translationPollJobId: Long? = null
@@ -139,6 +145,7 @@ class MainActivity : Activity() {
                     nextFingerprintRetries = 0
                     val job = core.beginJob(url)
                     core.setExtracted(job.id, title, text, fingerprint)
+                    setTranslationProgress(25, "Chapter " + chapterLabel(title) + " · Extracted")
                     setStatus("EXTRACTED · " + text.length + " characters · ready to translate")
                     toast("Chapter extracted")
                     val shouldAutoTranslate = autoWorkflowEnabled || autoTranslateOnNext
@@ -146,6 +153,7 @@ class MainActivity : Activity() {
                     if (shouldAutoTranslate) {
                         sourceView.postDelayed({
                             if (sourceView === activeWebView() && core.isCurrentJob(job.id)) {
+                                setTranslationProgress(40, "Chapter " + chapterLabel(title) + " · Sending")
                                 setStatus("AUTO · sending chapter to " + activeProvider)
                                 startTranslation()
                             }
@@ -166,6 +174,8 @@ class MainActivity : Activity() {
                 if (!core.markCompleted(job.id, cleaned)) return@runOnUiThread
                 core.saveTranslation(job.chapterUrl, cleaned)
                 lastInsertedJobId = job.id
+                completedTranslations[job.fingerprint] = cleaned
+                setTranslationProgress(100, "Chapter " + chapterLabel(job.title) + " · Complete")
                 translationPollJobId = null
                 translationBaselineJobId = null
                 translationBaseline = ""
@@ -403,13 +413,49 @@ class MainActivity : Activity() {
         actionsCard.addView(pill("Copy", minHeight = 39) { copyContent() }, LinearLayout.LayoutParams(0, dp(39), .75f))
         root.addView(actionsCard, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(7) })
 
+        val promptRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = rounded(SURFACE, 12, BORDER)
+            setPadding(dp(8), 0, dp(5), 0)
+        }
+        promptRow.addView(TextView(this).apply {
+            text = "PROMPT"
+            textSize = 9f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(MUTED)
+        }, LinearLayout.LayoutParams(0, dp(32), 1f))
+        promptRow.addView(pill("Edit", minWidth = 52, minHeight = 28) { showPromptEditor() })
+        root.addView(promptRow, LinearLayout.LayoutParams(-1, dp(34)).apply { topMargin = dp(5) })
+
+        val progressRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        progressLabel = TextView(this).apply {
+            text = "IDLE · No chapter"
+            textSize = 9f
+            setTextColor(MUTED)
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        progressRow.addView(progressLabel, LinearLayout.LayoutParams(dp(150), dp(24)))
+        progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            progress = 0
+            progressTintList = android.content.res.ColorStateList.valueOf(ACCENT)
+            trackTintList = android.content.res.ColorStateList.valueOf(BORDER)
+        }
+        progressRow.addView(progressBar, LinearLayout.LayoutParams(0, dp(8), 1f).apply { leftMargin = dp(6) })
+        root.addView(progressRow, LinearLayout.LayoutParams(-1, dp(28)))
+
         statusText = TextView(this).apply {
             text = "AUTO ON · Open a chapter → extract → send → translate → insert"
             textSize = 10f
             setTextColor(MUTED)
             gravity = Gravity.CENTER_VERTICAL
             maxLines = 2
-            setPadding(dp(5), dp(6), dp(5), 0)
+            setPadding(dp(5), 0, dp(5), 0)
         }
         root.addView(statusText, matchWrap())
         setContentView(root)
@@ -587,6 +633,7 @@ class MainActivity : Activity() {
                     toast("AI input box পাওয়া যায়নি")
                     return@evaluateJavascript
                 }
+                setTranslationProgress(65, "Chapter " + chapterLabel(job.title) + " · Translating")
                 setStatus("TRANSLATING · AI response-এর জন্য অপেক্ষা")
                 scheduleAiResponsePolling(job.id)
             }
@@ -684,6 +731,7 @@ class MainActivity : Activity() {
         nextPendingWebView = view
         nextWatchToken += 1
         val token = nextWatchToken
+        setTranslationProgress(5, "Next chapter · waiting")
         setStatus("NEXT CHAPTER · next link খোঁজা হচ্ছে")
         view.evaluateJavascript(ProviderHandlers.nextChapterScript(profile.nextSelectorsJson())) { raw ->
             if (raw == "true") {
@@ -732,6 +780,7 @@ class MainActivity : Activity() {
 
     private fun extractFrom(view: WebView) {
         if (view !== activeWebView()) return
+        setTranslationProgress(20, "Chapter · Extracting")
         setStatus("NEW CHAPTER · automatic extraction চলছে")
         view.evaluateJavascript("window.__NovelStudio&&window.__NovelStudio.extract();", null)
     }
@@ -864,8 +913,49 @@ class MainActivity : Activity() {
         setStatus("AI PROVIDER · " + activeProvider)
     }
 
+    private fun getSavedPrompt(): String = prefs.getString("translation_prompt", defaultPrompt).orEmpty()
+
+    private fun showPromptEditor() {
+        val input = EditText(this).apply {
+            setText(getSavedPrompt())
+            setTextColor(TEXT)
+            setHintTextColor(MUTED)
+            gravity = Gravity.TOP or Gravity.START
+            minLines = 8
+            maxLines = 14
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = rounded(SURFACE, 12, BORDER)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Translation Prompt")
+            .setMessage("এই prompt-এর শেষে chapter text নিজে থেকে যোগ হবে।")
+            .setView(input)
+            .setPositiveButton("Save") { _, _ ->
+                prefs.edit().putString("translation_prompt", input.text.toString().trim()).apply()
+                toast("Prompt saved")
+            }
+            .setNegativeButton("Cancel", null)
+            .setNeutralButton("Reset") { _, _ ->
+                prefs.edit().remove("translation_prompt").apply()
+                toast("Default prompt restored")
+            }
+            .show()
+    }
+
+    private fun setTranslationProgress(percent: Int, label: String) {
+        if (::progressBar.isInitialized) progressBar.progress = percent.coerceIn(0, 100)
+        if (::progressLabel.isInitialized) progressLabel.text = label
+    }
+
+    private fun chapterLabel(title: String): String {
+        val t = title.trim().replace(Regex("\\s+"), " ")
+        val m = Regex("(?i)(?:chapter|chap\\.?|第)\\s*([0-9一二三四五六七八九十百千]+)").find(t)
+        return m?.groupValues?.getOrNull(1) ?: t.take(28).ifBlank { "Unknown" }
+    }
+
     private fun showMoreMenu() {
         val items = arrayOf(
+            "Edit translation prompt",
             "Novel site profiles",
             "Ad blocker: " + if (adBlockEnabled) "ON" else "OFF",
             "Reload current AI",
@@ -873,13 +963,14 @@ class MainActivity : Activity() {
         )
         AlertDialog.Builder(this).setTitle("NovelStudio tools").setItems(items) { _, which ->
             when (which) {
-                0 -> showSiteProfiles()
-                1 -> {
+                0 -> showPromptEditor()
+                1 -> showSiteProfiles()
+                2 -> {
                     adBlockEnabled = !adBlockEnabled
                     toast("Ad blocker " + (if (adBlockEnabled) "ON" else "OFF") + " · page reload কর")
                 }
-                2 -> chatbot.reload()
-                3 -> AlertDialog.Builder(this).setTitle("NovelStudio Redesign")
+                3 -> chatbot.reload()
+                4 -> AlertDialog.Builder(this).setTitle("NovelStudio Redesign")
                     .setMessage("Novel reader + AI translation workspace. Extract → Translate → insert under the original chapter → Next auto-extracts the next chapter. Site selectors vary by website.")
                     .setPositiveButton("OK", null).show()
             }

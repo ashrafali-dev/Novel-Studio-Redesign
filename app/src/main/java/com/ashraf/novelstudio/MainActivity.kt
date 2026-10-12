@@ -45,6 +45,8 @@ class MainActivity : Activity() {
     private var translationSendJobId: Long? = null
     private var translationPollJobId: Long? = null
     private var lastInsertedJobId: Long? = null
+    private var translationBaselineJobId: Long? = null
+    private var translationBaseline: String = ""
 
     private val novelBridge = object {
         @JavascriptInterface
@@ -73,6 +75,8 @@ class MainActivity : Activity() {
                     core.invalidateCurrentJob()
                     translationSendJobId=null
                     translationPollJobId=null
+                    translationBaselineJobId=null
+                    translationBaseline=""
                     addressBar.setText(url)
                     statusText.text="SPA chapter route changed"
                     activeWebView()?.let{installPageHooks(it)}
@@ -94,6 +98,8 @@ class MainActivity : Activity() {
                 core.markCompleted(job.id, cleaned)
                 lastInsertedJobId = job.id
                 translationPollJobId = null
+                translationBaselineJobId = null
+                translationBaseline = ""
                 injectTranslation(cleaned)
             }
         }
@@ -256,8 +262,15 @@ class MainActivity : Activity() {
         val job=core.currentJob?:return
         if (translationSendJobId != job.id || job.extractedText.isBlank()) return
         val prompt="Translate the following novel chapter into natural, fluent literary Bengali. Preserve meaning, names, dialogue, paragraph structure, tone, emotions, humor and pacing. Do not summarize. Output only the Bengali translation.\n\n"+job.extractedText
-        chatbot.evaluateJavascript(ProviderHandlers.inputScript(chatbot.url.orEmpty(),prompt),null)
-        scheduleAiResponsePolling(job.id)
+        chatbot.evaluateJavascript(ProviderHandlers.responseScript(chatbot.url.orEmpty())) { raw ->
+            if (!core.isCurrentJob(job.id) || !core.translationRequested) return@evaluateJavascript
+            translationBaseline = runCatching {
+                org.json.JSONTokener(raw).nextValue() as? String
+            }.getOrNull().orEmpty().trim()
+            translationBaselineJobId = job.id
+            chatbot.evaluateJavascript(ProviderHandlers.inputScript(chatbot.url.orEmpty(),prompt),null)
+            scheduleAiResponsePolling(job.id)
+        }
     }
 
     private fun scheduleAiResponsePolling(id:Long){
@@ -268,7 +281,8 @@ class MainActivity : Activity() {
                 if(!core.isCurrentJob(id)||!core.translationRequested){ if(translationPollJobId==id) translationPollJobId=null; return }
                 chatbot.evaluateJavascript(ProviderHandlers.responseScript(chatbot.url.orEmpty())){raw->
                     val decoded=runCatching{org.json.JSONTokener(raw).nextValue() as? String}.getOrNull().orEmpty().trim()
-                    if(decoded.length>=40&&core.isCurrentJob(id)&&core.translationRequested)aiBridge.translationResult(decoded)
+                    val isNewResponse = translationBaselineJobId == id && decoded.length >= 40 && decoded != translationBaseline
+                    if(isNewResponse&&core.isCurrentJob(id)&&core.translationRequested)aiBridge.translationResult(decoded)
                 }
                 if(core.isCurrentJob(id)&&core.translationRequested)chatbot.postDelayed(this,2500) else if(translationPollJobId==id)translationPollJobId=null
             }
@@ -287,6 +301,8 @@ class MainActivity : Activity() {
         core.invalidateCurrentJob()
         translationSendJobId=null
         translationPollJobId=null
+        translationBaselineJobId=null
+        translationBaseline=""
         val profile=SiteProfiles.forUrl(activeWebView()?.url.orEmpty())
         activeWebView()?.evaluateJavascript(ProviderHandlers.nextChapterScript(profile.nextSelectorsJson())){r->
             statusText.text=if(r=="true")"Next chapter clicked · waiting for new page" else "Next button not found"

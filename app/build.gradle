@@ -4,7 +4,7 @@ plugins {
 }
 android {
     namespace 'com.ashraf.novelstudio'
-    compileSdk 35
+    compileSdk 37
     defaultConfig {
         applicationId 'com.ashraf.novelstudio'
         minSdk 24

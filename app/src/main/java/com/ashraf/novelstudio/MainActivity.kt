@@ -70,7 +70,7 @@ class MainActivity : Activity() {
         }
         addressBar = EditText(this).apply {
             hint = "URL লিখুন অথবা সার্চ করুন"
-            singleLine = true
+            setSingleLine(true)
             textSize = 14f
             setTextColor(Color.WHITE)
             setHintTextColor(Color.LTGRAY)
@@ -225,7 +225,7 @@ class MainActivity : Activity() {
     }
 
     private fun showExtensions() {
-        val input = EditText(this).apply { hint = "Signed HTTPS .xpi URL"; setText("https://"); singleLine = true }
+        val input = EditText(this).apply { hint = "Signed HTTPS .xpi URL"; setText("https://"); setSingleLine(true) }
         AlertDialog.Builder(this)
             .setTitle("WebExtension Manager")
             .setMessage("GeckoView extension installation uses Mozilla-signed XPI packages.")
@@ -237,15 +237,16 @@ class MainActivity : Activity() {
                 } else {
                     statusText.text = "Installing extension…"
                     runtime.webExtensionController.install(url).accept(
-                        { extension: WebExtension ->
+                        { extension: WebExtension? ->
                             runOnUiThread {
-                                statusText.text = "Installed: " + extension.metaData.name
+                                val name = extension?.metaData?.name ?: "Unknown extension"
+                                statusText.text = "Installed: " + name
                                 toast("Extension installed")
                             }
                         },
-                        { error: Throwable ->
+                        { error: Throwable? ->
                             runOnUiThread {
-                                statusText.text = "Extension install failed: " + error.message
+                                statusText.text = "Extension install failed: " + (error?.message ?: "unknown error")
                                 toast("Install failed")
                             }
                         }
@@ -260,14 +261,15 @@ class MainActivity : Activity() {
     private fun listExtensions() {
         runtime.webExtensionController.list().accept(
             { extensions ->
-                val names = extensions.map { it.metaData.name + " (" + it.id + ")" }.toTypedArray()
+                val safeExtensions = extensions.orEmpty()
+                val names = safeExtensions.map { it.metaData.name + " (" + it.id + ")" }.toTypedArray()
                 runOnUiThread {
                     AlertDialog.Builder(this).setTitle("Installed extensions (" + names.size + ")")
                         .setItems(names) { _, which -> toast(names[which]) }
                         .setPositiveButton("OK", null).show()
                 }
             },
-            { error -> runOnUiThread { toast("Could not list extensions: " + error.message) } }
+            { error -> runOnUiThread { toast("Could not list extensions: " + (error?.message ?: "unknown error")) } }
         )
     }
 

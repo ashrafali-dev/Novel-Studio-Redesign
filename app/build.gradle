@@ -20,5 +20,5 @@ android {
     buildTypes { release { minifyEnabled false } }
 }
 dependencies {
-    implementation 'org.mozilla.geckoview:geckoview-stable:160.0.20261011081412'
+    implementation 'org.mozilla.geckoview:geckoview:157.0.20261005135250'
 }

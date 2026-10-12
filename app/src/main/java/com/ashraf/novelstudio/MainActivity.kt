@@ -424,7 +424,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun configureWebView() {
+    private fun WebView.configureWebView() {
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
         settings.databaseEnabled = true

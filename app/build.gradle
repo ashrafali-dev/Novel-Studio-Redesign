@@ -4,6 +4,7 @@ android {
  compileSdk 37
  defaultConfig { applicationId 'com.ashraf.novelstudio'; minSdk 23; targetSdk 35; versionCode 2; versionName '2.1.0-webview' }
  compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+ buildFeatures { buildConfig true }
  buildTypes { release { minifyEnabled false } }
 }
 tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach { compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }

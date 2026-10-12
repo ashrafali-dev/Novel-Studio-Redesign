@@ -273,7 +273,14 @@ class MainActivity : Activity() {
     }
     private fun selectTab(i:Int){if(i !in tabs.indices)return;activeTab=i;browserHost.show(tabs[i].webView);addressBar.setText(tabs[i].webView.url?:tabs[i].lastUrl);renderTabs()}
     private fun closeActiveTab(){if(tabs.size<=1){toast("কমপক্ষে একটি ট্যাব খোলা থাকতে হবে");return};tabs.removeAt(activeTab).webView.destroy();activeTab=(activeTab-1).coerceAtLeast(0);browserHost.show(tabs[activeTab].webView);renderTabs()}
-    private fun renderTabs(){tabBar.removeAllViews();tabs.forEachIndexed{i,_->tabBar.addView(button((if(i==activeTab)"● "else" )+(i+1)){selectTab(i)},weight())};tabBar.addView(button("+"){createTab("https://www.google.com")},wrap())}
+    private fun renderTabs() {
+        tabBar.removeAllViews()
+        tabs.forEachIndexed { i, _ ->
+            val marker = if (i == activeTab) "● " else ""
+            tabBar.addView(button(marker + (i + 1)) { selectTab(i) }, weight())
+        }
+        tabBar.addView(button("+") { createTab("https://www.google.com") }, wrap())
+    }
     private fun toggleSplit(){splitEnabled=!splitEnabled;chatPanel.visibility=if(splitEnabled)View.VISIBLE else View.GONE;splitBar.visibility=if(splitEnabled)View.VISIBLE else View.GONE;updateSplitWeights()}
     private fun updateSplitWeights(){if(!::browserPanel.isInitialized)return;val b=browserPanel.layoutParams as LinearLayout.LayoutParams;b.height=0;b.weight=if(splitEnabled)splitRatio.toFloat()else 1f;browserPanel.layoutParams=b;val c=chatPanel.layoutParams as LinearLayout.LayoutParams;c.height=0;c.weight=(100-splitRatio).coerceAtLeast(20).toFloat();chatPanel.layoutParams=c}
     private fun loadChatbot(url:String){chatbot.loadUrl(url);statusText.text="Chatbot: "+url}

@@ -8,7 +8,7 @@ object ProviderHandlers {
         val promptJson = JSONObject.quote(prompt)
         val selectors = when {
             "gemini.google.com" in host ->
-                listOf("rich-textarea [contenteditable=true]", "rich-textarea", "[contenteditable=true]", "textarea")
+                listOf("rich-textarea [contenteditable=true]", "[contenteditable=true]", "textarea")
             "claude.ai" in host ->
                 listOf("div[contenteditable=true]", "[contenteditable=true]", "textarea")
             "chat.deepseek.com" in host || "deepseek.com" in host ->

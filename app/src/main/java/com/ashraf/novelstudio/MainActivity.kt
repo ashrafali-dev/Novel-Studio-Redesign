@@ -51,19 +51,21 @@ class MainActivity : Activity() {
         fun chapterPayload(json: String) {
             runOnUiThread {
                 runCatching {
-                    val o = JSONObject(json)
-                    val url = o.optString("url")
-                    val title = o.optString("title")
-                    val text = o.optString("text").trim()
-                    if (text.length < 80) { toast("Chapter text পাওয়া যায়নি"); return@runOnUiThread }
-                    val job = core.beginJob(url)
-                    core.setExtracted(job.id, title, text)
-                    statusText.text = "Extracted · " + text.length + " chars · job " + job.id
+                    val o=JSONObject(json)
+                    val url=o.optString("url")
+                    val title=o.optString("title")
+                    val text=o.optString("text").trim()
+                    if(text.length<80){toast("Chapter text পাওয়া যায়নি");return@runOnUiThread}
+                    val job=core.beginJob(url)
+                    core.setExtracted(job.id,title,text)
+                    statusText.text="Extracted · "+text.length+" chars · job "+job.id
                     toast("Chapter extracted")
                 }
+            }
+        }
 
         @JavascriptInterface
-        fun routeChanged(url: String) {
+        fun routeChanged(url:String){
             runOnUiThread {
                 val current=tabs.getOrNull(activeTab)?.lastUrl.orEmpty()
                 if(current!=url){
@@ -73,9 +75,8 @@ class MainActivity : Activity() {
                     translationPollJobId=null
                     addressBar.setText(url)
                     statusText.text="SPA chapter route changed"
+                    activeWebView()?.let{installPageHooks(it)}
                 }
-            }
-        }
             }
         }
     }

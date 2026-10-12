@@ -6,7 +6,7 @@ android {
     compileSdk 37
     defaultConfig {
         applicationId 'com.ashraf.novelstudio'
-        minSdk 24
+        minSdk 26
         targetSdk 35
         versionCode 1
         versionName '2.0.0-gecko'
@@ -22,6 +22,16 @@ tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
     compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
 }
 
+configurations.configureEach {
+    resolutionStrategy.eachDependency { details ->
+        if (details.requested.group == 'org.jetbrains.kotlin') {
+            details.useVersion('2.2.0')
+            details.because('AGP 9.1 built-in Kotlin compiler uses Kotlin 2.2 metadata')
+        }
+    }
+}
+
 dependencies {
     implementation 'org.mozilla.geckoview:geckoview:157.0.20261005135250'
+    implementation 'org.jetbrains.kotlin:kotlin-stdlib:2.2.0'
 }

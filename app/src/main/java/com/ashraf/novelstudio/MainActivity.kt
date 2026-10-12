@@ -879,6 +879,7 @@ class MainActivity : Activity() {
             "Back",
             "Forward",
             "Reload page",
+            "Automatic workflow: " + if (autoWorkflowEnabled) "ON" else "OFF",
             "AI provider: " + activeProvider,
             "Edit translation prompt",
             "Translation tracker",
@@ -892,16 +893,20 @@ class MainActivity : Activity() {
                 0 -> activeWebView()?.goBack()
                 1 -> activeWebView()?.goForward()
                 2 -> activeWebView()?.reload()
-                3 -> showProviderMenu()
-                4 -> showPromptEditor()
-                5 -> showTranslationTracker()
-                6 -> showSiteProfiles()
-                7 -> toggleSplit()
-                8 -> {
+                3 -> {
+                    autoWorkflowEnabled = !autoWorkflowEnabled
+                    toast("Automatic workflow " + if (autoWorkflowEnabled) "ON" else "OFF")
+                }
+                4 -> showProviderMenu()
+                5 -> showPromptEditor()
+                6 -> showTranslationTracker()
+                7 -> showSiteProfiles()
+                8 -> toggleSplit()
+                9 -> {
                     adBlockEnabled = !adBlockEnabled
                     toast("Ad blocker " + (if (adBlockEnabled) "ON" else "OFF") + " · page reload কর")
                 }
-                9 -> AlertDialog.Builder(this).setTitle("NovelStudio Redesign")
+                10 -> AlertDialog.Builder(this).setTitle("NovelStudio Redesign")
                     .setMessage("Novel reader + AI translation workspace.")
                     .setPositiveButton("OK", null).show()
             }

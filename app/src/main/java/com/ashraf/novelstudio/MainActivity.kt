@@ -31,6 +31,7 @@ import android.widget.Toast
 import org.json.JSONObject
 import org.json.JSONTokener
 import java.io.ByteArrayInputStream
+import java.security.MessageDigest
 
 class MainActivity : Activity() {
     private lateinit var addressBar: EditText
@@ -67,6 +68,9 @@ class MainActivity : Activity() {
     private var nextOriginUrl = ""
     private var nextPendingWebView: WebView? = null
     private var nextWatchToken = 0
+    private var nextOriginFingerprint = ""
+    private var nextOriginTitle = ""
+    private var nextFingerprintRetries = 0
 
     private val providerUrls = linkedMapOf(
         "ChatGPT" to "https://chatgpt.com/",
@@ -101,16 +105,40 @@ class MainActivity : Activity() {
                         toast("Chapter text পাওয়া যায়নি")
                         return@runOnUiThread
                     }
+                    val fingerprint = chapterFingerprint(title, text)
                     val previous = core.currentJob
-                    if (previous != null && previous.chapterUrl == url &&
-                        previous.extractedText == text && previous.status != NovelStudioCore.Status.INVALIDATED
+                    if (nextPending && nextPendingWebView === sourceView && nextOriginFingerprint.isNotBlank() &&
+                        fingerprint == nextOriginFingerprint
+                    ) {
+                        nextFingerprintRetries += 1
+                        if (nextFingerprintRetries <= 8) {
+                            setStatus("NEXT CHAPTER · পুরনো content এখনো আছে · অপেক্ষা করছি")
+                            sourceView.postDelayed({
+                                if (nextPending && nextPendingWebView === sourceView) extractFrom(sourceView)
+                            }, 900)
+                        } else {
+                            nextPending = false
+                            nextPendingWebView = null
+                            autoTranslateOnNext = false
+                            setStatus("NEXT CHAPTER · নতুন content শনাক্ত হয়নি")
+                            toast("Next চাপার পর chapter content বদলায়নি")
+                        }
+                        return@runOnUiThread
+                    }
+                    if (previous != null && previous.fingerprint == fingerprint &&
+                        previous.status != NovelStudioCore.Status.INVALIDATED
                     ) {
                         setStatus("এই chapter আগে থেকেই extracted · " + text.length + " characters")
                         toast("এই chapter আগেই extract করা আছে")
                         return@runOnUiThread
                     }
+                    nextPending = false
+                    nextPendingWebView = null
+                    nextOriginFingerprint = ""
+                    nextOriginTitle = ""
+                    nextFingerprintRetries = 0
                     val job = core.beginJob(url)
-                    core.setExtracted(job.id, title, text)
+                    core.setExtracted(job.id, title, text, fingerprint)
                     setStatus("EXTRACTED · " + text.length + " characters · ready to translate")
                     toast("Chapter extracted")
                     val shouldAutoTranslate = autoWorkflowEnabled || autoTranslateOnNext
@@ -122,31 +150,7 @@ class MainActivity : Activity() {
                                 startTranslation()
                             }
                         }, 700)
-                    }
-                }
-            }
-        }
-
-        @JavascriptInterface
-        fun routeChanged(url: String) {
-            runOnUiThread {
-                val tab = tabs.firstOrNull { it.webView === sourceView }
-                val previous = tab?.lastUrl.orEmpty()
-                if (previous != url) {
-                    tab?.lastUrl = url
-                    installPageHooks(sourceView)
-                    if (sourceView === activeWebView()) {
-                        core.invalidateCurrentJob()
-                        resetTranslationTracking()
-                        addressBar.setText(url)
-                        setStatus("Chapter route changed · refreshing page hooks")
-                        if (nextPending && nextPendingWebView === sourceView && url != nextOriginUrl) {
-                            scheduleNextChapterExtraction(sourceView)
-                        } else if (!nextPending) {
-                            autoTranslateOnNext = false
-                        }
-                    }
-                }
+                    }                }
             }
         }
     }
@@ -666,9 +670,13 @@ class MainActivity : Activity() {
     private fun nextChapter() {
         val view = activeWebView() ?: return
         val profile = SiteProfiles.forUrl(view.url.orEmpty())
-        autoTranslateOnNext = core.currentJob?.let {
+        val current = core.currentJob
+        autoTranslateOnNext = current?.let {
             it.status == NovelStudioCore.Status.COMPLETED && it.translation.isNotBlank()
         } == true
+        nextOriginFingerprint = current?.fingerprint.orEmpty()
+        nextOriginTitle = current?.title.orEmpty()
+        nextFingerprintRetries = 0
         core.invalidateCurrentJob()
         resetTranslationTracking()
         nextPending = true
@@ -679,14 +687,12 @@ class MainActivity : Activity() {
         setStatus("NEXT CHAPTER · next link খোঁজা হচ্ছে")
         view.evaluateJavascript(ProviderHandlers.nextChapterScript(profile.nextSelectorsJson())) { raw ->
             if (raw == "true") {
-                setStatus("NEXT CHAPTER · page change detect করছি")
+                setStatus("NEXT CHAPTER · নতুন URL/content detect করছি")
                 view.postDelayed({
                     if (nextPending && nextPendingWebView === view && nextWatchToken == token) {
-                        nextPending = false
-                        nextPendingWebView = null
                         extractFrom(view)
                     }
-                }, 2800)
+                }, 1800)
             } else {
                 nextPending = false
                 nextPendingWebView = null
@@ -698,13 +704,19 @@ class MainActivity : Activity() {
     }
 
     private fun scheduleNextChapterExtraction(view: WebView) {
-        nextPending = false
-        nextPendingWebView = null
         nextWatchToken += 1
         setStatus("NEW CHAPTER · content load হওয়ার অপেক্ষা")
         view.postDelayed({
-            if (view === activeWebView()) extractFrom(view)
+            if (view === activeWebView() && nextPendingWebView === view) extractFrom(view)
         }, 1100)
+    }
+
+    private fun chapterFingerprint(title: String, text: String): String {
+        val normalized = (title.trim() + "\n" + text.trim())
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        val digest = MessageDigest.getInstance("SHA-256").digest(normalized.toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it) }
     }
 
     private fun isLikelyChapterUrl(url: String): Boolean {

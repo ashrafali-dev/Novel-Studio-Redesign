@@ -68,7 +68,7 @@ class MainActivity : Activity() {
     private var lastPolledCandidate = ""
     private var stableCandidatePolls = 0
 
-    private var autoWorkflowEnabled = true
+    private val autoWorkflowEnabled = true
     private var autoTranslateOnNext = false
     private var autoExtractUrl = ""
     private var nextPending = false
@@ -340,15 +340,15 @@ class MainActivity : Activity() {
         actionsCard.addView(pill("⇩", primary = true, minWidth = 48, minHeight = 38) {
             activeWebView()?.let { extractFrom(it) }
         }, LinearLayout.LayoutParams(dp(52), dp(38)).apply { rightMargin = dp(3) })
-        actionsCard.addView(pill(if (autoWorkflowEnabled) "AUTO" else "AUTO",
-            primary = autoWorkflowEnabled, minWidth = 64, minHeight = 38) {
-            autoWorkflowEnabled = !autoWorkflowEnabled
-            toast(if (autoWorkflowEnabled) "AUTO ON · Extract → Send → Wait → Insert" else "AUTO OFF")
-        }, LinearLayout.LayoutParams(0, dp(38), 1f).apply { rightMargin = dp(3) })
-        actionsCard.addView(pill("›", minWidth = 48, minHeight = 38) { nextChapter() },
-            LinearLayout.LayoutParams(dp(52), dp(38)).apply { rightMargin = dp(3) })
-        actionsCard.addView(pill("☷", minWidth = 48, minHeight = 38) { showTranslationTracker() },
-            LinearLayout.LayoutParams(dp(52), dp(38)))
+        actionsCard.addView(pill("‹", minWidth = 48, minHeight = 38) {
+            activeWebView()?.goBack()
+        }, LinearLayout.LayoutParams(dp(52), dp(38)).apply { rightMargin = dp(3) })
+        actionsCard.addView(pill("›", minWidth = 48, minHeight = 38) {
+            nextChapter()
+        }, LinearLayout.LayoutParams(dp(52), dp(38)).apply { rightMargin = dp(3) })
+        actionsCard.addView(pill("☷", minWidth = 48, minHeight = 38) {
+            showTranslationTracker()
+        }, LinearLayout.LayoutParams(dp(52), dp(38)))
         root.addView(actionsCard, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(5) })
 
         val progressRow = LinearLayout(this).apply {

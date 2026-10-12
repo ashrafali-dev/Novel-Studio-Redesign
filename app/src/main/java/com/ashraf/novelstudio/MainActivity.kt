@@ -756,13 +756,21 @@ class MainActivity : Activity() {
         setStatus("TAB " + (index + 1) + " · " + Uri.parse(tabs[index].webView.url ?: tabs[index].lastUrl).host.orEmpty())
     }
 
-    private fun closeActiveTab() {
+    private fun closeActiveTab() = closeTabAt(activeTab)
+
+    private fun closeTabAt(index: Int) {
         if (tabs.size <= 1) {
             toast("কমপক্ষে একটি tab খোলা থাকতে হবে")
             return
         }
-        tabs.removeAt(activeTab).webView.destroy()
-        activeTab = (activeTab - 1).coerceAtLeast(0)
+        if (index !in tabs.indices) return
+        val previousActive = activeTab
+        tabs.removeAt(index).webView.destroy()
+        activeTab = when {
+            index < previousActive -> previousActive - 1
+            index == previousActive -> (index - 1).coerceAtLeast(0)
+            else -> previousActive
+        }.coerceIn(0, tabs.lastIndex)
         browserHost.show(tabs[activeTab].webView)
         addressBar.setText(tabs[activeTab].webView.url ?: tabs[activeTab].lastUrl)
         renderTabs()
@@ -778,12 +786,8 @@ class MainActivity : Activity() {
             chip.setOnLongClickListener {
                 if (tabs.size > 1) AlertDialog.Builder(this)
                     .setMessage("এই tab বন্ধ করবে?")
-                    .setPositiveButton("Close") { _, _ ->
-                        val old = activeTab
-                        activeTab = i
-                        closeActiveTab()
-                        if (old < tabs.size && old >= 0) selectTab(old.coerceAtMost(tabs.lastIndex))
-                    }.setNegativeButton("Cancel", null).show()
+                    .setPositiveButton("Close") { _, _ -> closeTabAt(i) }
+                    .setNegativeButton("Cancel", null).show()
                 true
             }
             tabBar.addView(chip, LinearLayout.LayoutParams(-2, dp(30)).apply { rightMargin = dp(5) })
@@ -837,7 +841,7 @@ class MainActivity : Activity() {
                 0 -> showSiteProfiles()
                 1 -> {
                     adBlockEnabled = !adBlockEnabled
-                    toast("Ad blocker " + if (adBlockEnabled) "ON" else "OFF" + " · page reload কর")
+                    toast("Ad blocker " + (if (adBlockEnabled) "ON" else "OFF") + " · page reload কর")
                 }
                 2 -> chatbot.reload()
                 3 -> AlertDialog.Builder(this).setTitle("NovelStudio Redesign")
@@ -851,7 +855,7 @@ class MainActivity : Activity() {
         val items = quickSites.map { it.label + "  ·  " + Uri.parse(it.url).host }.toTypedArray()
         AlertDialog.Builder(this).setTitle("Novel site profiles").setItems(items) { _, which ->
             navigate(quickSites[which].url)
-        }.setPositiveButton("Custom URL", null).show()
+        }.setPositiveButton("Custom URL") { _, _ -> showCustomSiteDialog() }.show()
     }
 
     private fun showCustomSiteDialog() {

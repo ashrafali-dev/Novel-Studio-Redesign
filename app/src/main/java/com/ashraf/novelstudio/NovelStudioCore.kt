@@ -18,10 +18,10 @@ class NovelStudioCore {
         return job
     }
 
-    fun setExtracted(id: Long, title: String, text: String): Boolean {
+    fun setExtracted(id: Long, title: String, text: String, fingerprint: String = ""): Boolean {
         val job = currentJob ?: return false
         if (job.id != id || job.status == Status.INVALIDATED) return false
-        currentJob = job.copy(title = title, extractedText = text, status = Status.EXTRACTED)
+        currentJob = job.copy(title = title, extractedText = text, fingerprint = fingerprint, status = Status.EXTRACTED)
         return true
     }
 
@@ -68,7 +68,8 @@ class NovelStudioCore {
         val title: String,
         val extractedText: String,
         val status: Status,
-        val translation: String = ""
+        val translation: String = "",
+        val fingerprint: String = ""
     )
 
     enum class Status { EXTRACT_REQUESTED, EXTRACTED, TRANSLATION_REQUESTED, COMPLETED, INVALIDATED }

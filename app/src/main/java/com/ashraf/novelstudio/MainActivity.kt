@@ -337,18 +337,18 @@ class MainActivity : Activity() {
             background = rounded(SURFACE, 13, BORDER)
             setPadding(dp(3), dp(3), dp(3), dp(3))
         }
-        actionsCard.addView(pill("Extract", primary = true, minHeight = 38) {
+        actionsCard.addView(pill("⇩", primary = true, minWidth = 48, minHeight = 38) {
             activeWebView()?.let { extractFrom(it) }
-        }, LinearLayout.LayoutParams(0, dp(38), .85f).apply { rightMargin = dp(3) })
-        actionsCard.addView(pill(if (autoWorkflowEnabled) "AUTO ON" else "AUTO OFF",
-            primary = autoWorkflowEnabled, minHeight = 38) {
+        }, LinearLayout.LayoutParams(dp(52), dp(38)).apply { rightMargin = dp(3) })
+        actionsCard.addView(pill(if (autoWorkflowEnabled) "AUTO" else "AUTO",
+            primary = autoWorkflowEnabled, minWidth = 64, minHeight = 38) {
             autoWorkflowEnabled = !autoWorkflowEnabled
-            toast(if (autoWorkflowEnabled) "AUTO: Extract → Send → Wait → Insert" else "AUTO বন্ধ · Extract করলে শুধু text নেবে")
+            toast(if (autoWorkflowEnabled) "AUTO ON · Extract → Send → Wait → Insert" else "AUTO OFF")
         }, LinearLayout.LayoutParams(0, dp(38), 1f).apply { rightMargin = dp(3) })
-        actionsCard.addView(pill("Next ›", minHeight = 38) { nextChapter() },
-            LinearLayout.LayoutParams(0, dp(38), .85f).apply { rightMargin = dp(3) })
-        actionsCard.addView(pill("Track", minHeight = 38) { showTranslationTracker() },
-            LinearLayout.LayoutParams(0, dp(38), .75f))
+        actionsCard.addView(pill("›", minWidth = 48, minHeight = 38) { nextChapter() },
+            LinearLayout.LayoutParams(dp(52), dp(38)).apply { rightMargin = dp(3) })
+        actionsCard.addView(pill("☷", minWidth = 48, minHeight = 38) { showTranslationTracker() },
+            LinearLayout.LayoutParams(dp(52), dp(38)))
         root.addView(actionsCard, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(5) })
 
         val progressRow = LinearLayout(this).apply {
@@ -879,8 +879,6 @@ class MainActivity : Activity() {
             "Back",
             "Forward",
             "Reload page",
-            "Extract current chapter",
-            "Copy current chapter / translation",
             "AI provider: " + activeProvider,
             "Edit translation prompt",
             "Translation tracker",
@@ -894,18 +892,16 @@ class MainActivity : Activity() {
                 0 -> activeWebView()?.goBack()
                 1 -> activeWebView()?.goForward()
                 2 -> activeWebView()?.reload()
-                3 -> activeWebView()?.let { extractFrom(it) }
-                4 -> copyContent()
-                5 -> showProviderMenu()
-                6 -> showPromptEditor()
-                7 -> showTranslationTracker()
-                8 -> showSiteProfiles()
-                9 -> toggleSplit()
-                10 -> {
+                3 -> showProviderMenu()
+                4 -> showPromptEditor()
+                5 -> showTranslationTracker()
+                6 -> showSiteProfiles()
+                7 -> toggleSplit()
+                8 -> {
                     adBlockEnabled = !adBlockEnabled
                     toast("Ad blocker " + (if (adBlockEnabled) "ON" else "OFF") + " · page reload কর")
                 }
-                11 -> AlertDialog.Builder(this).setTitle("NovelStudio Redesign")
+                9 -> AlertDialog.Builder(this).setTitle("NovelStudio Redesign")
                     .setMessage("Novel reader + AI translation workspace.")
                     .setPositiveButton("OK", null).show()
             }

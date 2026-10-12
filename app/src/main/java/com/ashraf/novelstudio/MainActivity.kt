@@ -444,7 +444,7 @@ class MainActivity : Activity() {
             max = 100
             progress = 0
             progressTintList = android.content.res.ColorStateList.valueOf(ACCENT)
-            trackTintList = android.content.res.ColorStateList.valueOf(BORDER)
+            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(BORDER)
         }
         progressRow.addView(progressBar, LinearLayout.LayoutParams(0, dp(8), 1f).apply { leftMargin = dp(6) })
         root.addView(progressRow, LinearLayout.LayoutParams(-1, dp(28)))

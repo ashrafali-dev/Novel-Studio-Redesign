@@ -82,10 +82,11 @@ class MainActivity : Activity() {
         SiteShortcut("AsianNovel", "https://www.asiannovel.net/")
     )
 
-    private val novelBridge = object {
+    private inner class NovelBridge(private val sourceView: WebView) {
         @JavascriptInterface
         fun chapterPayload(json: String) {
             runOnUiThread {
+                if (sourceView !== activeWebView()) return@runOnUiThread
                 runCatching {
                     val obj = JSONObject(json)
                     val url = obj.optString("url")
@@ -115,18 +116,19 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun routeChanged(url: String) {
             runOnUiThread {
-                val view = activeWebView() ?: return@runOnUiThread
-                val tab = tabs.getOrNull(activeTab)
+                val tab = tabs.firstOrNull { it.webView === sourceView }
                 val previous = tab?.lastUrl.orEmpty()
                 if (previous != url) {
                     tab?.lastUrl = url
-                    core.invalidateCurrentJob()
-                    resetTranslationTracking()
-                    addressBar.setText(url)
-                    setStatus("Chapter route changed · refreshing page hooks")
-                    installPageHooks(view)
-                    if (nextPending && nextPendingWebView === view && url != nextOriginUrl) {
-                        scheduleNextChapterExtraction(view)
+                    installPageHooks(sourceView)
+                    if (sourceView === activeWebView()) {
+                        core.invalidateCurrentJob()
+                        resetTranslationTracking()
+                        addressBar.setText(url)
+                        setStatus("Chapter route changed · refreshing page hooks")
+                        if (nextPending && nextPendingWebView === sourceView && url != nextOriginUrl) {
+                            scheduleNextChapterExtraction(sourceView)
+                        }
                     }
                 }
             }
@@ -447,7 +449,7 @@ class MainActivity : Activity() {
         }
         val view = WebView(this).apply {
             configureWebView()
-            addJavascriptInterface(novelBridge, "NovelStudio")
+            addJavascriptInterface(NovelBridge(this), "NovelStudio")
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = false
 
@@ -594,7 +596,7 @@ class MainActivity : Activity() {
                     val hasNewResponse = translationBaselineJobId == id &&
                         snapshot.text.length >= 40 &&
                         snapshot.text != translationBaseline &&
-                        (snapshot.count > translationBaselineCount || snapshot.text != translationBaseline)
+                        snapshot.count > translationBaselineCount
                     if (hasNewResponse) {
                         if (snapshot.text == lastPolledCandidate && !snapshot.streaming) {
                             stableCandidatePolls += 1

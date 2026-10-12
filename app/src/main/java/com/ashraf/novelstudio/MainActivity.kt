@@ -176,7 +176,7 @@ class MainActivity : Activity() {
         chatbot=WebView(this).apply{
             configureWebView();addJavascriptInterface(aiBridge,"NovelStudioAI")
             webViewClient=object:WebViewClient(){
-                override fun onPageFinished(v:WebView,url:String){statusText.text="AI ready · "+url;if(core.translationRequested)injectTranslationPrompt()}
+                override fun onPageFinished(v:WebView,url:String){statusText.text="AI ready · "+url}
             }
             loadUrl("https://chatgpt.com")
         }

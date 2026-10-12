@@ -94,6 +94,7 @@ class MainActivity : Activity() {
                     val title = obj.optString("title")
                     val text = obj.optString("text").trim()
                     if (text.length < 80) {
+                        autoTranslateOnNext = false
                         setStatus("Chapter text পাওয়া যায়নি · অন্য selector দরকার হতে পারে")
                         toast("Chapter text পাওয়া যায়নি")
                         return@runOnUiThread

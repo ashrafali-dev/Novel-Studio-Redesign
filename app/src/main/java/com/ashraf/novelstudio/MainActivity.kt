@@ -61,6 +61,21 @@ class MainActivity : Activity() {
                     statusText.text = "Extracted · " + text.length + " chars · job " + job.id
                     toast("Chapter extracted")
                 }
+
+        @JavascriptInterface
+        fun routeChanged(url: String) {
+            runOnUiThread {
+                val current=tabs.getOrNull(activeTab)?.lastUrl.orEmpty()
+                if(current!=url){
+                    tabs.getOrNull(activeTab)?.lastUrl=url
+                    core.invalidateCurrentJob()
+                    translationSendJobId=null
+                    translationPollJobId=null
+                    addressBar.setText(url)
+                    statusText.text="SPA chapter route changed"
+                }
+            }
+        }
             }
         }
     }
@@ -214,9 +229,8 @@ class MainActivity : Activity() {
     }
 
     private fun installPageHooks(view:WebView){
-        val selectors=SiteProfiles.selectorJson()
-        val js="""(function(){window.__NovelStudio={extract:function(){var s=$selectors,b=null,score=-1;s.forEach(function(q){document.querySelectorAll(q).forEach(function(e){var t=(e.innerText||e.textContent||'').trim(),x=t.length+Math.min(e.querySelectorAll('p').length*80,2000);if(t.length>200&&x>score){b=e;score=x;}})});if(!b)b=document.querySelector('article,main,[role="main"]');var t=(b?(b.innerText||b.textContent):document.body.innerText||'').trim().replace(/\n{3,}/g,'\n\n');if(window.NovelStudio)NovelStudio.chapterPayload(JSON.stringify({title:document.title,url:location.href,text:t}));}}})();"""
-        view.evaluateJavascript(js,null)
+        val profile=SiteProfiles.forUrl(view.url.orEmpty())
+        view.evaluateJavascript(ProviderHandlers.pageHookScript(profile.chapterSelectorsJson()),null)
     }
 
     private fun extractChapter(){
@@ -239,12 +253,9 @@ class MainActivity : Activity() {
 
     private fun injectTranslationPrompt(){
         val job=core.currentJob?:return
-        if (translationSendJobId != job.id) return
-        if(job.extractedText.isBlank())return
+        if (translationSendJobId != job.id || job.extractedText.isBlank()) return
         val prompt="Translate the following novel chapter into natural, fluent literary Bengali. Preserve meaning, names, dialogue, paragraph structure, tone, emotions, humor and pacing. Do not summarize. Output only the Bengali translation.\n\n"+job.extractedText
-        val escaped=JSONObject.quote(prompt)
-        val js="""(function(){var p=$escaped,el=document.querySelector('textarea,[contenteditable="true"]');if(!el)return;el.focus();if(el.tagName==='TEXTAREA'){var s=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set;s.call(el,p);el.dispatchEvent(new Event('input',{bubbles:true}));}else{el.textContent=p;el.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:p}));}var b=document.querySelector('button[type="submit"],button[aria-label*="Send"],button[data-testid*="send"]');if(b)b.click();})();"""
-        chatbot.evaluateJavascript(js,null)
+        chatbot.evaluateJavascript(ProviderHandlers.inputScript(chatbot.url.orEmpty(),prompt),null)
         scheduleAiResponsePolling(job.id)
     }
 
@@ -253,11 +264,14 @@ class MainActivity : Activity() {
         translationPollJobId = id
         chatbot.postDelayed(object:Runnable{
             override fun run(){
-                if(!core.isCurrentJob(id)||!core.translationRequested){ if (translationPollJobId == id) translationPollJobId = null; return }
-                chatbot.evaluateJavascript("""(function(){var a=[];document.querySelectorAll('[data-message-author-role="assistant"],article,[class*="markdown"],[class*="response"]').forEach(function(e){var t=(e.innerText||e.textContent||'').trim();if(t.length>80)a.push(t);});if(a.length&&window.NovelStudioAI)NovelStudioAI.translationResult(a[a.length-1]);})();""",null)
-                if(core.isCurrentJob(id)&&core.translationRequested)chatbot.postDelayed(this,2500) else if (translationPollJobId == id) translationPollJobId = null
+                if(!core.isCurrentJob(id)||!core.translationRequested){ if(translationPollJobId==id) translationPollJobId=null; return }
+                chatbot.evaluateJavascript(ProviderHandlers.responseScript(chatbot.url.orEmpty())){raw->
+                    val decoded=runCatching{org.json.JSONTokener(raw).nextValue() as? String}.getOrNull().orEmpty().trim()
+                    if(decoded.length>=40&&core.isCurrentJob(id)&&core.translationRequested)aiBridge.translationResult(decoded)
+                }
+                if(core.isCurrentJob(id)&&core.translationRequested)chatbot.postDelayed(this,2500) else if(translationPollJobId==id)translationPollJobId=null
             }
-        },6000)
+        },4500)
     }
 
     private fun injectTranslation(text:String){
@@ -270,10 +284,12 @@ class MainActivity : Activity() {
 
     private fun nextChapter(){
         core.invalidateCurrentJob()
-        translationSendJobId = null
-        translationPollJobId = null
-        val selectors=SiteProfiles.nextSelectorJson()
-        activeWebView()?.evaluateJavascript(ProviderHandlers.nextChapterScript(selectors)){r->statusText.text=if(r=="true")"Next chapter clicked" else "Next button not found"}
+        translationSendJobId=null
+        translationPollJobId=null
+        val profile=SiteProfiles.forUrl(activeWebView()?.url.orEmpty())
+        activeWebView()?.evaluateJavascript(ProviderHandlers.nextChapterScript(profile.nextSelectorsJson())){r->
+            statusText.text=if(r=="true")"Next chapter clicked · waiting for new page" else "Next button not found"
+        }
     }
 
     private fun copyChapter(){

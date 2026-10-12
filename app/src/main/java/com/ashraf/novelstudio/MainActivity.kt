@@ -60,7 +60,9 @@ class MainActivity : Activity() {
     private var lastPolledCandidate = ""
     private var stableCandidatePolls = 0
 
+    private var autoWorkflowEnabled = true
     private var autoTranslateOnNext = false
+    private var autoExtractUrl = ""
     private var nextPending = false
     private var nextOriginUrl = ""
     private var nextPendingWebView: WebView? = null
@@ -111,14 +113,15 @@ class MainActivity : Activity() {
                     core.setExtracted(job.id, title, text)
                     setStatus("EXTRACTED · " + text.length + " characters · ready to translate")
                     toast("Chapter extracted")
-                    if (autoTranslateOnNext) {
-                        autoTranslateOnNext = false
+                    val shouldAutoTranslate = autoWorkflowEnabled || autoTranslateOnNext
+                    autoTranslateOnNext = false
+                    if (shouldAutoTranslate) {
                         sourceView.postDelayed({
                             if (sourceView === activeWebView() && core.isCurrentJob(job.id)) {
-                                setStatus("NEXT CHAPTER · auto-translation starting")
+                                setStatus("AUTO · sending chapter to " + activeProvider)
                                 startTranslation()
                             }
-                        }, 650)
+                        }, 700)
                     }
                 }
             }
@@ -252,20 +255,7 @@ class MainActivity : Activity() {
         }, LinearLayout.LayoutParams(-2, dp(44)).apply { leftMargin = dp(7) })
         root.addView(addressRow, matchWrap())
 
-        val shortcutScroll = HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-            clipToPadding = false
-            setPadding(0, dp(7), 0, dp(7))
-        }
-        val shortcutRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        quickSites.forEach { site ->
-            val chip = pill(site.label) { navigate(site.url) }
-            shortcutRow.addView(chip, LinearLayout.LayoutParams(-2, dp(33)).apply { rightMargin = dp(6) })
-        }
-        shortcutRow.addView(pill("＋ Custom") { showCustomSiteDialog() }, LinearLayout.LayoutParams(-2, dp(33)))
-        shortcutScroll.addView(shortcutRow)
-        root.addView(shortcutScroll, matchWrap())
-
+        // Site shortcuts are intentionally hidden from the reader workspace; use More → Site profiles.
         val navRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -274,17 +264,16 @@ class MainActivity : Activity() {
         navRow.addView(pill("›", minWidth = 42) { activeWebView()?.let { if (it.canGoForward()) it.goForward() } }, weightButton())
         navRow.addView(pill("↻", minWidth = 42) { activeWebView()?.reload() }, weightButton())
         navRow.addView(pill("Tabs", selected = true) { showTabs() }, weightButton())
-        navRow.addView(pill(if (splitEnabled) "Split" else "Reader", selected = splitEnabled) { toggleSplit() }, weightButton())
-        root.addView(navRow, LinearLayout.LayoutParams(-1, dp(37)).apply { bottomMargin = dp(5) })
-
-        val tabScroll = HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-            setPadding(0, 0, 0, dp(5))
+        navRow.addView(pill(if        val compactTools = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
         }
-        tabBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        tabScroll.addView(tabBar)
-        root.addView(tabScroll, matchWrap())
-
+        compactTools.addView(pill("‹", minWidth = 38) { activeWebView()?.goBack() }, weightButton())
+        compactTools.addView(pill("›", minWidth = 38) { activeWebView()?.goForward() }, weightButton())
+        compactTools.addView(pill("↻", minWidth = 38) { activeWebView()?.reload() }, weightButton())
+        compactTools.addView(pill("Tabs", minWidth = 58) { showTabs() }, weightButton())
+        compactTools.addView(pill("Split", selected = splitEnabled, minWidth = 58) { toggleSplit() }, weightButton())
+        root.addView(compactTools, LinearLayout.LayoutParams(-1, dp(32)).apply { bottomMargin = dp(2) })
         val workspace = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             clipChildren = false
@@ -398,22 +387,19 @@ class MainActivity : Activity() {
         val actionsCard = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            background = rounded(SURFACE, 18, BORDER)
-            setPadding(dp(5), dp(5), dp(5), dp(5))
+            background = rounded(SURFACE, 14, BORDER)
+            setPadding(dp(3), dp(3), dp(3), dp(3))
         }
-        actionsCard.addView(pill("Extract", minHeight = 45) { extractChapter() }, LinearLayout.LayoutParams(0, dp(45), 1f).apply { rightMargin = dp(4) })
-        val translateButton = pill("Translate", primary = true, minHeight = 45) { startTranslation() }
-        translateButton.setOnLongClickListener {
-            confirmRetranslation()
-            true
-        }
-        actionsCard.addView(translateButton, LinearLayout.LayoutParams(0, dp(45), 1.25f).apply { rightMargin = dp(4) })
-        actionsCard.addView(pill("Next ›", minHeight = 45) { nextChapter() }, LinearLayout.LayoutParams(0, dp(45), 0.95f).apply { rightMargin = dp(4) })
-        actionsCard.addView(pill("Copy", minHeight = 45) { copyContent() }, LinearLayout.LayoutParams(0, dp(45), 0.8f))
+        actionsCard.addView(pill(if (autoWorkflowEnabled) "AUTO ON" else "AUTO OFF", primary = autoWorkflowEnabled, minHeight = 39) {
+            autoWorkflowEnabled = !autoWorkflowEnabled
+            toast(if (autoWorkflowEnabled) "AUTO: Extract → Send → Wait → Insert → Next" else "AUTO বন্ধ")
+        }, LinearLayout.LayoutParams(0, dp(39), 1.1f).apply { rightMargin = dp(3) })
+        actionsCard.addView(pill("Next ›", minHeight = 39) { nextChapter() }, LinearLayout.LayoutParams(0, dp(39), .9f).apply { rightMargin = dp(3) })
+        actionsCard.addView(pill("Copy", minHeight = 39) { copyContent() }, LinearLayout.LayoutParams(0, dp(39), .75f))
         root.addView(actionsCard, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(7) })
 
         statusText = TextView(this).apply {
-            text = "READY · Open a novel chapter to begin"
+            text = "AUTO ON · Open a chapter → extract → send → translate → insert"
             textSize = 10f
             setTextColor(MUTED)
             gravity = Gravity.CENTER_VERTICAL
@@ -485,6 +471,14 @@ class MainActivity : Activity() {
                     installPageHooks(view)
                     if (nextPending && nextPendingWebView === view && url != nextOriginUrl) {
                         scheduleNextChapterExtraction(view)
+                    } else if (autoWorkflowEnabled && view === activeWebView() && isLikelyChapterUrl(url) && autoExtractUrl != url) {
+                        autoExtractUrl = url
+                        view.postDelayed({
+                            if (view === activeWebView() && view.url == url && core.currentJob?.chapterUrl != url) {
+                                setStatus("AUTO · extracting chapter")
+                                extractFrom(view)
+                            }
+                        }, 1200)
                     }
                 }
             }
@@ -710,6 +704,17 @@ class MainActivity : Activity() {
         view.postDelayed({
             if (view === activeWebView()) extractFrom(view)
         }, 1100)
+    }
+
+    private fun isLikelyChapterUrl(url: String): Boolean {
+        val u = url.lowercase()
+        if (u.isBlank()) return false
+        return u.contains("/chapter/") ||
+            u.contains("/chapters/") ||
+            u.contains("/chapter-") ||
+            u.contains("/read/") ||
+            u.contains("/novel/") && (u.contains("chapter") || u.count { it == '/' } >= 5) ||
+            u.contains("qidian.com") && u.matches(Regex(".*\\d{6,}.*"))
     }
 
     private fun extractFrom(view: WebView) {

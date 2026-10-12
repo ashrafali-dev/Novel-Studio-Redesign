@@ -91,6 +91,6 @@ var title=(document.querySelector('h1')&&document.querySelector('h1').innerText)
 if(window.NovelStudio)NovelStudio.chapterPayload(JSON.stringify({title:title,url:location.href,text:text}));
 return !!b;
 };
-if(!window.__NovelStudioListenersInstalled){window.__NovelStudioListenersInstalled=true;var notify=function(){setTimeout(function(){if(window.NovelStudio&&NovelStudio.routeChanged)NovelStudio.routeChanged(location.href)},120)};var push=history.pushState,replace=history.replaceState;history.pushState=function(){var result=push.apply(this,arguments);notify();return result};history.replaceState=function(){var result=replace.apply(this,arguments);notify()};window.addEventListener('popstate',notify);window.addEventListener('hashchange',notify)}
+if(!window.__NovelStudioListenersInstalled){window.__NovelStudioListenersInstalled=true;var notify=function(){setTimeout(function(){if(window.NovelStudio&&NovelStudio.routeChanged)NovelStudio.routeChanged(location.href)},120)};var push=history.pushState,replace=history.replaceState;history.pushState=function(){var result=push.apply(this,arguments);notify();return result};history.replaceState=function(){var result=replace.apply(this,arguments);notify();return result};window.addEventListener('popstate',notify);window.addEventListener('hashchange',notify)}
 })()""".replace("__SELECTORS__", selectorsJson)
 }

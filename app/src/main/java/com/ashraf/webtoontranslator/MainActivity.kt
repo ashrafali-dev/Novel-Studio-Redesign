@@ -19,6 +19,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.view.Gravity
+import android.view.View
 import android.widget.FrameLayout
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
@@ -630,7 +631,7 @@ class MainActivity : Activity() {
 
     private fun queueTranslationBatches(token: Int, outcomes: List<ImageOutcome>, final: Boolean) {
         if (token != activeScanToken) return
-        val lines = outcomes.sortedBy { it.image.index }.flatMap { it.lines }
+        val lines = outcomes.sortedBy { it.info.index }.flatMap { it.lines }
         synchronized(translationBatches) {
             while ((nextBatch + 1) * 50 <= lines.size) {
                 val start = nextBatch * 50

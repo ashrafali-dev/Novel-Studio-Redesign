@@ -558,13 +558,26 @@ class MainActivity : Activity() {
                     val outcome = try {
                         val bitmap = downloadBitmap(info.url, pageUrl, userAgent)
                         try {
+                            var bestBitmap = bitmap
                             var result = Tasks.await(recognizer.process(InputImage.fromBitmap(bitmap, 0)), 60, TimeUnit.SECONDS)
-                            if (result.text.isBlank()) {
+                            var bestLines = extractLines(info.index, result, bitmap.width, bitmap.height)
+                            // Webtoon panels often contain small lettering. Retry blank/near-blank
+                            // images at a larger scale with stronger contrast, and keep the best result.
+                            if (bestLines.size < 2) {
                                 val retry = prepareOcrRetryBitmap(bitmap)
-                                try { result = Tasks.await(recognizer.process(InputImage.fromBitmap(retry, 0)), 60, TimeUnit.SECONDS) }
-                                finally { if (retry !== bitmap) retry.recycle() }
+                                try {
+                                    val retryResult = Tasks.await(recognizer.process(InputImage.fromBitmap(retry, 0)), 60, TimeUnit.SECONDS)
+                                    val retryLines = extractLines(info.index, retryResult, retry.width, retry.height)
+                                    if (retryLines.size > bestLines.size || retryResult.text.length > result.text.length) {
+                                        result = retryResult
+                                        bestLines = retryLines
+                                        bestBitmap = retry
+                                    }
+                                } finally {
+                                    if (retry !== bitmap && retry !== bestBitmap) retry.recycle()
+                                }
                             }
-                            ImageOutcome(info, extractLines(info.index, result, bitmap.width, bitmap.height), null)
+                            ImageOutcome(info, bestLines, null)
                         } finally { bitmap.recycle() }
                     } catch (error: Exception) { ImageOutcome(info, emptyList(), readableError(error)) }
                     val snapshot = synchronized(ocrQueueLock) {

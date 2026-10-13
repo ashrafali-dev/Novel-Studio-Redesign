@@ -1,15 +1,47 @@
 plugins { id 'com.android.application' }
+
 android {
- namespace 'com.ashraf.novelstudio'
- compileSdk 37
- defaultConfig { applicationId 'com.ashraf.novelstudio.redesign'; minSdk 23; targetSdk 35; versionCode 1; versionName '1.0.0-webview' }
- compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
- buildFeatures { buildConfig true }
- buildTypes {
-   debug { }
-   release { minifyEnabled false }
- }
+    namespace 'com.ashraf.webtoontranslator'
+    compileSdk 37
+
+    defaultConfig {
+        applicationId 'com.ashraf.webtoontranslator'
+        minSdk 23
+        targetSdk 35
+        versionCode 1
+        versionName '0.1.0-phase1'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildFeatures { buildConfig true }
+
+    buildTypes {
+        debug { }
+        release { minifyEnabled false }
+    }
 }
-tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach { compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
-configurations.configureEach { resolutionStrategy.eachDependency { d -> if(d.requested.group=='org.jetbrains.kotlin'){d.useVersion('2.2.10');d.because('AGP 9.1 built-in Kotlin compiler compatibility')} } }
-dependencies { implementation 'org.jetbrains.kotlin:kotlin-stdlib:2.2.10' }
+
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+    compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+}
+
+configurations.configureEach {
+    resolutionStrategy.eachDependency { d ->
+        if (d.requested.group == 'org.jetbrains.kotlin') {
+            d.useVersion('2.2.10')
+            d.because('Keep the built-in AGP Kotlin compiler and Kotlin standard library aligned')
+        }
+    }
+}
+
+dependencies {
+    implementation 'org.jetbrains.kotlin:kotlin-stdlib:2.2.10'
+    implementation 'com.google.mlkit:text-recognition:16.0.1'
+    implementation 'com.google.mlkit:text-recognition-chinese:16.0.1'
+    implementation 'com.google.mlkit:text-recognition-japanese:16.0.1'
+    implementation 'com.google.mlkit:text-recognition-korean:16.0.1'
+}

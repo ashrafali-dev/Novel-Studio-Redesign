@@ -1,4 +1,4 @@
-name: NovelStudio Redesign Build
+name: Webtoon Translator Build
 on:
   push:
     branches: [ main ]
@@ -20,6 +20,8 @@ jobs:
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon
       - uses: actions/upload-artifact@v4
+        if: success()
         with:
-          name: novelstudio-redesign-debug
+          name: webtoon-translator-debug
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error

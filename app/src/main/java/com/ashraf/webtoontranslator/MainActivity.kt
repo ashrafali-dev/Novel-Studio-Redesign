@@ -97,6 +97,9 @@ class MainActivity : Activity() {
     private val processedImageIndices = mutableSetOf<Int>()
     private var ocrWorkerRunning = false
     private var imageCollectionComplete = false
+    private val translatedLineTexts = java.util.TreeMap<Int, String>()
+    private val ocrLineCatalog = java.util.TreeMap<Int, OcrLine>()
+    private val ocrImageCatalog = java.util.TreeMap<Int, ImageInfo>()
     private val translationPrompt = "Translate every OCR line into natural, fluent Bengali. CRITICAL FORMAT: output exactly one line per input line, preserving each [L###] ID exactly once at the start of its translated line. Never remove, renumber, merge, split, reorder, explain, or summarize any line. Output only the translated lines with their IDs."
 
     private var scanPageUrl: String = ""
@@ -394,6 +397,9 @@ class MainActivity : Activity() {
             processedImageIndices.clear()
             ocrWorkerRunning = false
             imageCollectionComplete = false
+            translatedLineTexts.clear()
+            ocrLineCatalog.clear()
+            ocrImageCatalog.clear()
         }
         synchronized(translationBatches) {
             translationBatches.clear()

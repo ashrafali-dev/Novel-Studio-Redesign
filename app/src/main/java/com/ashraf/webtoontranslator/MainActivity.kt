@@ -523,8 +523,9 @@ class MainActivity : Activity() {
         return list
     }
 
-    private fun startNativeOcr(token: Int, images: List<ImageInfo>) {
+    private fun startNativeOcr(token: Int) {
         val recognizer = runCatching { createRecognizer(scriptSpinner.selectedItemPosition) }.getOrElse {
+            synchronized(ocrQueueLock) { ocrWorkerRunning = false }
             finishScan("Could not start the selected OCR model: " + (it.message ?: "unknown error"))
             return
         }
@@ -532,51 +533,46 @@ class MainActivity : Activity() {
         val userAgent = webView.settings.userAgentString.ifBlank { "Mozilla/5.0 Android WebtoonTranslator" }
         val pageUrl = scanPageUrl
         worker.execute {
-            val outcomes = mutableListOf<ImageOutcome>()
             try {
-                for ((position, info) in images.withIndex()) {
-                    if (!isCurrentScan(token)) return@execute
+                while (isCurrentScan(token)) {
+                    val info = synchronized(ocrQueueLock) {
+                        while (pendingOcrImages.isEmpty() && !imageCollectionComplete && isCurrentScan(token)) {
+                            try { ocrQueueLock.wait(250) } catch (_: InterruptedException) {}
+                        }
+                        if (!isCurrentScan(token)) null else if (pendingOcrImages.isNotEmpty()) {
+                            val item = pendingOcrImages.pollFirstEntry()?.value
+                            if (item != null) processedImageIndices.add(item.index)
+                            item
+                        } else null
+                    }
+                    if (info == null) {
+                        if (synchronized(ocrQueueLock) { imageCollectionComplete && pendingOcrImages.isEmpty() } || !isCurrentScan(token)) break
+                        continue
+                    }
                     val outcome = try {
                         val bitmap = downloadBitmap(info.url, pageUrl, userAgent)
                         try {
-                            // Run OCR on the original first, then retry a cleaned/upscaled copy
-                            // when the source is a long webtoon panel and ML Kit finds no text.
-                            var textResult = Tasks.await(
-                                recognizer.process(InputImage.fromBitmap(bitmap, 0)),
-                                60,
-                                TimeUnit.SECONDS
-                            )
-                            if (textResult.text.isBlank()) {
-                                val retryBitmap = prepareOcrRetryBitmap(bitmap)
-                                try {
-                                    textResult = Tasks.await(
-                                        recognizer.process(InputImage.fromBitmap(retryBitmap, 0)),
-                                        60,
-                                        TimeUnit.SECONDS
-                                    )
-                                } finally {
-                                    if (retryBitmap !== bitmap) retryBitmap.recycle()
-                                }
+                            var result = Tasks.await(recognizer.process(InputImage.fromBitmap(bitmap, 0)), 60, TimeUnit.SECONDS)
+                            if (result.text.isBlank()) {
+                                val retry = prepareOcrRetryBitmap(bitmap)
+                                try { result = Tasks.await(recognizer.process(InputImage.fromBitmap(retry, 0)), 60, TimeUnit.SECONDS) }
+                                finally { if (retry !== bitmap) retry.recycle() }
                             }
-                            ImageOutcome(info, extractLines(info.index, textResult, bitmap.width, bitmap.height), null)
-                        } finally {
-                            bitmap.recycle()
-                        }
-                    } catch (error: Exception) {
-                        ImageOutcome(info, emptyList(), readableError(error))
+                            ImageOutcome(info, extractLines(info.index, result, bitmap.width, bitmap.height), null)
+                        } finally { bitmap.recycle() }
+                    } catch (error: Exception) { ImageOutcome(info, emptyList(), readableError(error)) }
+                    val snapshot = synchronized(ocrQueueLock) {
+                        val map = currentOutcomes.associateBy { it.info.index }.toMutableMap()
+                        map[outcome.info.index] = outcome
+                        map.values.sortedBy { it.info.index }.also { currentOutcomes = it }
                     }
-                    outcomes.add(outcome)
-                    val snapshot = outcomes.toList()
                     runOnUiThread {
                         if (isCurrentScan(token)) {
-                            currentOutcomes = snapshot
-                            progressBar.max = images.size
-                            progressBar.progress = position + 1
-                            val lineCount = snapshot.sumOf { it.lines.size }
-                            statusLabel.text = "OCR image " + (position + 1) + "/" + images.size +
-                                " · " + lineCount + " text lines"
-                            imageCountLabel.text = (position + 1).toString() + "/" + images.size +
-                                " images · " + lineCount + " lines"
+                            progressBar.max = maxOf(currentImages.size, progressBar.progress + 1)
+                            progressBar.progress += 1
+                            val count = snapshot.sumOf { it.lines.size }
+                            statusLabel.text = "OCR image " + snapshot.size + " · " + count + " lines · translating as batches fill"
+                            imageCountLabel.text = currentImages.size.toString() + " images collected · " + count + " OCR lines"
                             renderResults()
                             queueTranslationBatches(token, snapshot, false)
                             renderDiagnosticBoxes(token, snapshot)
@@ -585,23 +581,21 @@ class MainActivity : Activity() {
                 }
                 runOnUiThread {
                     if (isCurrentScan(token)) {
-                        val ok = outcomes.count { it.error == null }
-                        val lineCount = outcomes.sumOf { it.lines.size }
-                        val failures = outcomes.count { it.error != null }
-                        queueTranslationBatches(token, outcomes, true)
-                        finishScan("OCR finished · " + ok + "/" + images.size + " images processed · " +
-                            lineCount + " lines recognized" + if (failures > 0) " · " + failures + " image errors" else "")
+                        val all = currentOutcomes
+                        val ok = all.count { it.error == null }
+                        val count = all.sumOf { it.lines.size }
+                        val failed = all.count { it.error != null }
+                        queueTranslationBatches(token, all, true)
+                        finishScan("OCR finished · " + ok + "/" + all.size + " images processed · " +
+                            count + " lines recognized" + if (failed > 0) " · " + failed + " image errors" else "")
                     }
                 }
             } catch (error: Exception) {
-                runOnUiThread {
-                    if (isCurrentScan(token)) finishScan("OCR stopped: " + readableError(error))
-                }
+                runOnUiThread { if (isCurrentScan(token)) finishScan("OCR stopped: " + readableError(error)) }
             } finally {
                 runCatching { recognizer.close() }
-                runOnUiThread {
-                    if (currentRecognizer === recognizer) currentRecognizer = null
-                }
+                synchronized(ocrQueueLock) { ocrWorkerRunning = false }
+                runOnUiThread { if (currentRecognizer === recognizer) currentRecognizer = null }
             }
         }
     }

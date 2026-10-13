@@ -19,6 +19,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.view.Gravity
+import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.ArrayAdapter
 import android.widget.Button
@@ -320,7 +321,7 @@ class MainActivity : Activity() {
             setTextIsSelectable(true)
             setPadding(dp(10), dp(8), dp(10), dp(10))
         }
-        resultScroll.addView(resultText, ScrollView.LayoutParams(-1, -2))
+        resultScroll.addView(resultText, ViewGroup.LayoutParams(-1, -2))
         root.addView(resultScroll, LinearLayout.LayoutParams(-1, 0, 0.32f))
         setContentView(root)
     }
@@ -610,6 +611,13 @@ class MainActivity : Activity() {
             output.write(buffer, 0, count)
         }
         return output.toByteArray()
+    }
+
+    private fun readableError(error: Throwable): String {
+        val detail = error.cause?.message?.takeIf { it.isNotBlank() }
+            ?: error.message?.takeIf { it.isNotBlank() }
+            ?: error.javaClass.simpleName
+        return detail.replace('\n', ' ').take(180)
     }
 
     private fun renderDiagnosticBoxes(token: Int, outcomes: List<ImageOutcome>) {

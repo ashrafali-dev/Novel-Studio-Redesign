@@ -497,8 +497,8 @@ class MainActivity : Activity() {
         var height = img.naturalHeight || 0;
         var rect = img.getBoundingClientRect();
         var style = window.getComputedStyle(img);
-        if (!src || width < 160 || height < 130 || width * height < 35000) return;
-        if (style.display === 'none' || style.visibility === 'hidden' || rect.width < 20 || rect.height < 20) return;
+        if (!src || width < 80 || height < 80 || width * height < 12000) return;
+        if (style.display === 'none' || style.visibility === 'hidden' || rect.width < 10 || rect.height < 10) return;
         if (!/^(https?:|data:image\/|blob:)/i.test(src)) return;
         var normalizedSrc = src.split('#')[0];
         if (seenSources[normalizedSrc]) return;
@@ -507,7 +507,7 @@ class MainActivity : Activity() {
         img.setAttribute('data-webtoon-ocr-index', String(index));
         chapterImages.push({
           index: index,
-          url: new URL(src, document.baseURI).href,
+          url: new URL((img.getAttribute('data-src') || img.getAttribute('data-original') || img.currentSrc || img.src || src), document.baseURI).href,
           width: width,
           height: height,
           alt: img.alt || ''
@@ -521,6 +521,8 @@ class MainActivity : Activity() {
           pageTitle: document.title || '',
           steps: steps,
           truncated: steps >= maxSteps,
+          totalDomImages: document.images.length,
+          loadedImages: collectLoadedCount(),
           images: chapterImages
         }));
       }

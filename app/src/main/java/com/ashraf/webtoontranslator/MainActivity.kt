@@ -310,7 +310,15 @@ class MainActivity : Activity() {
             setPadding(dp(5), 0, dp(5), 0)
             setOnClickListener {
                 chatWebView.visibility = if (chatWebView.visibility == View.VISIBLE) View.GONE else View.VISIBLE
-                chatToggleButton.text = if (chatWebView.visibility == View.VISIBLE) "Hide chat" else "ChatGPT"
+                chatToggleButton.text = if (chatWebView.visibility == View.VISIBLE) "Hide chat" else "ChatGPT / Gemini"
+            }
+            setOnLongClickListener {
+                val gemini = chatWebView.url.orEmpty().contains("gemini.google.com")
+                chatWebView.loadUrl(if (gemini) "https://chatgpt.com/" else "https://gemini.google.com/app")
+                chatWebView.visibility = View.VISIBLE
+                chatToggleButton.text = if (gemini) "ChatGPT" else "Gemini"
+                toast(if (gemini) "Opening ChatGPT" else "Opening Gemini")
+                true
             }
         }
         resultsHeader.addView(chatToggleButton, LinearLayout.LayoutParams(-2, dp(31)).apply { leftMargin = dp(4) })
@@ -678,7 +686,7 @@ class MainActivity : Activity() {
     private fun pollChatBatch(token: Int, index: Int, started: Long, previous: String, stable: Int) {
         android.os.Handler(mainLooper).postDelayed({
             if (token != activeScanToken) return@postDelayed
-            chatWebView.evaluateJavascript("(function(){var a=document.querySelectorAll('[data-message-author-role=assistant]');var n=a.length?a[a.length-1]:null;var busy=!!document.querySelector('button[data-testid=stop-button],button[aria-label*=Stop]');return JSON.stringify({text:n?(n.innerText||''):'',busy:busy});})()") { raw ->
+            chatWebView.evaluateJavascript("(function(){var a=document.querySelectorAll('[data-message-author-role=assistant],.model-response-text,.response-container message-content,[class*=response-content]');var n=a.length?a[a.length-1]:null;var busy=!!document.querySelector('button[data-testid=stop-button],button[aria-label*=Stop],button[aria-label*=Stop]');return JSON.stringify({text:n?(n.innerText||''):'',busy:busy});})()") { raw ->
                 if (token != activeScanToken) return@evaluateJavascript
                 val obj = runCatching { JSONObject(decodeJsResult(raw)) }.getOrNull()
                 val reply = obj?.optString("text").orEmpty().trim()

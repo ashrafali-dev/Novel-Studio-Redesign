@@ -564,6 +564,7 @@ class MainActivity : Activity() {
                             imageCountLabel.text = (position + 1).toString() + "/" + images.size +
                                 " images · " + lineCount + " lines"
                             renderResults()
+                            queueTranslationBatches(token, snapshot, false)
                             renderDiagnosticBoxes(token, snapshot)
                         }
                     }
@@ -573,6 +574,7 @@ class MainActivity : Activity() {
                         val ok = outcomes.count { it.error == null }
                         val lineCount = outcomes.sumOf { it.lines.size }
                         val failures = outcomes.count { it.error != null }
+                        queueTranslationBatches(token, outcomes, true)
                         finishScan("OCR finished · " + ok + "/" + images.size + " images processed · " +
                             lineCount + " lines recognized" + if (failures > 0) " · " + failures + " image errors" else "")
                     }
@@ -587,6 +589,47 @@ class MainActivity : Activity() {
                     if (currentRecognizer === recognizer) currentRecognizer = null
                 }
             }
+        }
+    }
+
+    private fun queueTranslationBatches(token: Int, outcomes: List<ImageOutcome>, final: Boolean) {
+        if (token != activeScanToken) return
+        val lines = outcomes.sortedBy { it.image.index }.flatMap { it.lines }
+        synchronized(translationBatches) {
+            while ((nextBatch + 1) * 50 <= lines.size) {
+                val start = nextBatch * 50
+                translationBatches[nextBatch] = lines.subList(start, start + 50).mapIndexed { i, line ->
+                    "[L" + (start + i + 1).toString().padStart(3, '0') + "] " + line.text
+                }.joinToString("\n")
+                nextBatch++
+            }
+            if (final && nextBatch * 50 < lines.size) {
+                val start = nextBatch * 50
+                translationBatches[nextBatch] = lines.subList(start, lines.size).mapIndexed { i, line ->
+                    "[L" + (start + i + 1).toString().padStart(3, '0') + "] " + line.text
+                }.joinToString("\n")
+                nextBatch++
+            }
+        }
+        runOnUiThread { imageCountLabel.text = lines.size.toString() + " lines · " + nextBatch + " translation batches" }
+        sendNextTranslationBatch(token)
+    }
+
+    private fun sendNextTranslationBatch(token: Int) {
+        val index: Int
+        val batch: String
+        synchronized(translationBatches) {
+            if (token != activeScanToken || sendingBatch) return
+            index = translatedBatches.size
+            batch = translationBatches[index] ?: return
+            sendingBatch = true
+        }
+        val payload = translationPrompt + "\n\nTranslate batch " + (index + 1) +
+            ". Preserve every line ID exactly once.\n\n" + batch
+        scannerWebView.evaluateJavascript("void(0)", null)
+        runOnUiThread {
+            statusLabel.text = "OCR ready: batch " + (index + 1) + " queued. Chatbot WebView integration pending."
+            synchronized(translationBatches) { sendingBatch = false }
         }
     }
 

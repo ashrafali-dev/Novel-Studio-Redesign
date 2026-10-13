@@ -406,6 +406,9 @@ class MainActivity : Activity() {
         if (!src || width < 160 || height < 130 || width * height < 35000) return;
         if (style.display === 'none' || style.visibility === 'hidden' || rect.width < 20 || rect.height < 20) return;
         if (!/^(https?:|data:image\/|blob:)/i.test(src)) return;
+        var normalizedSrc = src.split('#')[0];
+        if (seenSources[normalizedSrc]) return;
+        seenSources[normalizedSrc] = true;
         var index = chapterImages.length;
         img.setAttribute('data-webtoon-ocr-index', String(index));
         chapterImages.push({

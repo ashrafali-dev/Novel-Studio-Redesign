@@ -135,8 +135,8 @@ class MainActivity : Activity() {
                 renderResults()
                 progressBar.max = parsed.size
                 progressBar.progress = 0
-                imageCountLabel.text = parsed.size.toString() + " chapter images"
-                statusLabel.text = "Found " + parsed.size + " images · preparing native OCR"
+                imageCountLabel.text = parsed.size.toString() + " chapter images" + if (root.optBoolean("truncated", false)) " · scan limit reached" else ""
+                statusLabel.text = "Found " + parsed.size + " images from " + root.optInt("totalDomImages", parsed.size) + " page elements" + if (root.optBoolean("truncated", false)) " · collection limit reached" else "" + " · preparing native OCR"
                 startNativeOcr(token, parsed)
             }
         }
@@ -465,20 +465,20 @@ class MainActivity : Activity() {
   var viewport = Math.max(window.innerHeight || 600, 400);
   var stepSize = Math.max(320, Math.floor(viewport * 0.78));
   var y = 0, stable = 0, steps = 0, previousHeight = -1, previousLoaded = -1;
-  var maxSteps = 420;
+  var maxSteps = 180;
   var collectLoadedCount = function() {
     return Array.prototype.filter.call(document.images, function(img) { return img.complete && img.naturalWidth > 0; }).length;
   };
   var walk = async function() {
     try {
       window.scrollTo(0, 0);
-      await sleep(250);
+      await sleep(120);
       while (steps < maxSteps) {
         var height = pageHeight();
         var bottom = Math.max(0, height - viewport);
         y = Math.min(y + stepSize, bottom);
         window.scrollTo(0, y);
-        await sleep(220);
+        await sleep(100);
         var nextHeight = pageHeight();
         var loaded = collectLoadedCount();
         var atBottom = y >= Math.max(0, nextHeight - viewport - 12);
@@ -490,10 +490,10 @@ class MainActivity : Activity() {
         if (steps % 4 === 0 && window.WebtoonBridge) {
           try { window.WebtoonBridge.onScrollProgress(token, steps, loaded, nextHeight); } catch (e) {}
         }
-        if (atBottom && stable >= 4) break;
+        if (atBottom && stable >= 3) break;
       }
       window.scrollTo(0, pageHeight());
-      await sleep(550);
+      await sleep(350);
       var imgs = Array.prototype.slice.call(document.images);
       imgs.forEach(function(img) { img.removeAttribute('data-webtoon-ocr-index'); });
       var chapterImages = [];

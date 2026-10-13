@@ -558,7 +558,6 @@ class MainActivity : Activity() {
                     val outcome = try {
                         val bitmap = downloadBitmap(info.url, pageUrl, userAgent)
                         try {
-                            var bestBitmap = bitmap
                             var result = Tasks.await(recognizer.process(InputImage.fromBitmap(bitmap, 0)), 60, TimeUnit.SECONDS)
                             var bestLines = extractLines(info.index, result, bitmap.width, bitmap.height)
                             // Webtoon panels often contain small lettering. Retry blank/near-blank
@@ -571,10 +570,9 @@ class MainActivity : Activity() {
                                     if (retryLines.size > bestLines.size || retryResult.text.length > result.text.length) {
                                         result = retryResult
                                         bestLines = retryLines
-                                        bestBitmap = retry
                                     }
                                 } finally {
-                                    if (retry !== bitmap && retry !== bestBitmap) retry.recycle()
+                                    if (retry !== bitmap) retry.recycle()
                                 }
                             }
                             ImageOutcome(info, bestLines, null)

@@ -92,6 +92,11 @@ class MainActivity : Activity() {
     private var nextBatch = 0
     private var sendingBatch = false
     private var chatBaselineCount = 0
+    private val ocrQueueLock = java.lang.Object()
+    private val pendingOcrImages = java.util.TreeMap<Int, ImageInfo>()
+    private val processedImageIndices = mutableSetOf<Int>()
+    private var ocrWorkerRunning = false
+    private var imageCollectionComplete = false
     private val translationPrompt = "Translate the following OCR lines into natural, fluent Bengali. Preserve line IDs and order exactly. Do not omit or summarize."
 
     private var scanPageUrl: String = ""
@@ -122,22 +127,25 @@ class MainActivity : Activity() {
                     finishScan("Could not parse images: " + (it.message ?: "unknown error"))
                     return@runOnUiThread
                 }
-                if (parsed.isEmpty()) {
+                val complete = root.optBoolean("collectionComplete", true)
+                if (parsed.isEmpty() && complete) {
                     val detail = root.optString("error")
-                    finishScan(
-                        if (detail.isNotBlank()) "Page scan error: " + detail
-                        else "No chapter images found. The page may use CSS backgrounds or a protected image loader."
-                    )
+                    finishScan(if (detail.isNotBlank()) "Page scan error: " + detail else "No chapter images found. The page may use CSS backgrounds or a protected image loader.")
                     return@runOnUiThread
                 }
-                currentImages = parsed
-                currentOutcomes = emptyList()
-                renderResults()
-                progressBar.max = parsed.size
-                progressBar.progress = 0
-                imageCountLabel.text = parsed.size.toString() + " chapter images" + if (root.optBoolean("truncated", false)) " · scan limit reached" else ""
-                statusLabel.text = "Found " + parsed.size + " images from " + root.optInt("totalDomImages", parsed.size) + " page elements" + if (root.optBoolean("truncated", false)) " · collection limit reached" else "" + " · preparing native OCR"
-                startNativeOcr(token, parsed)
+                synchronized(ocrQueueLock) {
+                    parsed.forEach { if (!processedImageIndices.contains(it.index)) pendingOcrImages[it.index] = it }
+                    if (complete) imageCollectionComplete = true
+                    ocrQueueLock.notifyAll()
+                    currentImages = (currentImages + parsed).distinctBy { it.index }.sortedBy { it.index }
+                    if (!ocrWorkerRunning && (pendingOcrImages.isNotEmpty() || imageCollectionComplete)) {
+                        ocrWorkerRunning = true
+                        startNativeOcr(token)
+                    }
+                }
+                progressBar.max = maxOf(100, currentImages.size)
+                imageCountLabel.text = currentImages.size.toString() + " images collected · " + currentOutcomes.sumOf { it.lines.size } + " OCR lines" + if (complete) " · collection complete" else " · scanning…"
+                statusLabel.text = "Collected " + currentImages.size + " images · OCR and translation running in background"
             }
         }
     }
@@ -381,6 +389,18 @@ class MainActivity : Activity() {
         scanInProgress = true
         currentImages = emptyList()
         currentOutcomes = emptyList()
+        synchronized(ocrQueueLock) {
+            pendingOcrImages.clear()
+            processedImageIndices.clear()
+            ocrWorkerRunning = false
+            imageCollectionComplete = false
+        }
+        synchronized(translationBatches) {
+            translationBatches.clear()
+            translatedBatches.clear()
+            nextBatch = 0
+            sendingBatch = false
+        }
         scanButton.isEnabled = false
         scriptSpinner.isEnabled = false
         progressBar.max = 100

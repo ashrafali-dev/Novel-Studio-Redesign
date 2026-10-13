@@ -1,9 +1,11 @@
 package com.ashraf.webtoontranslator
 
 import android.app.Activity
+import android.app.DownloadManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
@@ -11,6 +13,8 @@ import android.graphics.Rect
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
+import android.os.Environment
+import android.provider.Settings
 import android.os.Bundle
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
@@ -69,6 +73,8 @@ class MainActivity : Activity() {
     private lateinit var resultText: TextView
     private lateinit var chatWebView: WebView
     private lateinit var chatToggleButton: Button
+    private lateinit var updateButton: TextView
+    private var pendingApkUri: Uri? = null
     private lateinit var bottomPanel: FrameLayout
     private var activeBottomPanel: String = ""
 
@@ -167,7 +173,8 @@ class MainActivity : Activity() {
             setTextColor(TEXT)
             letterSpacing = 0.035f
         }, LinearLayout.LayoutParams(0, dp(30), 1f))
-        titleRow.addView(chip("PHASE 1", ACCENT, Color.WHITE), LinearLayout.LayoutParams(-2, dp(25)))
+        updateButton = chip("UPDATE APK", ACCENT, Color.WHITE).apply { setOnClickListener { checkForAppUpdate() } }
+        titleRow.addView(updateButton, LinearLayout.LayoutParams(-2, dp(30)))
         root.addView(titleRow, LinearLayout.LayoutParams(-1, dp(34)))
 
         val addressRow = LinearLayout(this).apply {
@@ -974,6 +981,123 @@ class MainActivity : Activity() {
         scanButton.isEnabled = true
         scriptSpinner.isEnabled = true
         statusLabel.text = message
+    }
+
+    private fun checkForAppUpdate() {
+        updateButton.text = "CHECKING…"
+        worker.execute {
+            try {
+                val connection = URL("https://api.github.com/repos/ashrafali-dev/Novel-Studio-Redesign/releases?per_page=1").openConnection() as HttpURLConnection
+                val releaseJson = try {
+                    connection.connectTimeout = 12000
+                    connection.readTimeout = 12000
+                    connection.setRequestProperty("Accept", "application/vnd.github+json")
+                    connection.setRequestProperty("User-Agent", "WebtoonTranslator-Android")
+                    if (connection.responseCode !in 200..299) throw IOException("GitHub returned HTTP " + connection.responseCode)
+                    connection.inputStream.bufferedReader().use { it.readText() }
+                } finally { connection.disconnect() }
+                val releases = JSONArray(releaseJson)
+                if (releases.length() == 0) throw IOException("No APK release published yet.")
+                val release = releases.getJSONObject(0)
+                val assets = release.optJSONArray("assets") ?: JSONArray()
+                var apkUrl = ""
+                for (i in 0 until assets.length()) {
+                    val asset = assets.optJSONObject(i) ?: continue
+                    if (asset.optString("name").endsWith(".apk", true)) {
+                        apkUrl = asset.optString("browser_download_url")
+                        if (apkUrl.isNotBlank()) break
+                    }
+                }
+                if (apkUrl.isBlank()) throw IOException("Latest release has no APK asset.")
+                runOnUiThread {
+                    updateButton.text = "UPDATE APK"
+                    android.app.AlertDialog.Builder(this)
+                        .setTitle("Webtoon Translator update")
+                        .setMessage("Available build: " + release.optString("name", release.optString("tag_name")) + "\nPublished: " + release.optString("published_at") + "\n\nDownload APK inside the app?")
+                        .setNegativeButton("Cancel", null)
+                        .setPositiveButton("Download") { _, _ -> downloadAndInstallApk(apkUrl) }
+                        .show()
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    updateButton.text = "UPDATE APK"
+                    Toast.makeText(this, "Update check failed: " + (error.message ?: "unknown error"), Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun downloadAndInstallApk(apkUrl: String) {
+        try {
+            val request = DownloadManager.Request(Uri.parse(apkUrl))
+                .setTitle("Webtoon Translator update")
+                .setDescription("Downloading latest APK…")
+                .setMimeType("application/vnd.android.package-archive")
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                .setAllowedOverMetered(true)
+                .setAllowedOverRoaming(false)
+                .setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, "webtoon-translator-update.apk")
+            val manager = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+            val downloadId = manager.enqueue(request)
+            Toast.makeText(this, "APK download started. Android will notify when it finishes.", Toast.LENGTH_LONG).show()
+            val receiver = object : android.content.BroadcastReceiver() {
+                override fun onReceive(context: Context?, intent: Intent?) {
+                    if (intent?.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L) != downloadId) return
+                    try { unregisterReceiver(this) } catch (_: Exception) {}
+                    manager.query(DownloadManager.Query().setFilterById(downloadId)).use { cursor ->
+                        if (!cursor.moveToFirst()) {
+                            Toast.makeText(this@MainActivity, "Could not find downloaded APK.", Toast.LENGTH_LONG).show()
+                            return
+                        }
+                        val statusIndex = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
+                        if (statusIndex < 0 || cursor.getInt(statusIndex) != DownloadManager.STATUS_SUCCESSFUL) {
+                            val reasonIndex = cursor.getColumnIndex(DownloadManager.COLUMN_REASON)
+                            val reason = if (reasonIndex >= 0) cursor.getInt(reasonIndex) else -1
+                            Toast.makeText(this@MainActivity, "APK download failed (code $reason).", Toast.LENGTH_LONG).show()
+                            return
+                        }
+                    }
+                    val uri = manager.getUriForDownloadedFile(downloadId)
+                    if (uri == null) {
+                        Toast.makeText(this@MainActivity, "Downloaded APK could not be opened.", Toast.LENGTH_LONG).show()
+                        return
+                    }
+                    pendingApkUri = uri
+                    runOnUiThread { requestInstallDownloadedApk(uri) }
+                }
+            }
+            if (android.os.Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(receiver, android.content.IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE), Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("DEPRECATION")
+                registerReceiver(receiver, android.content.IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
+            }
+        } catch (error: Exception) {
+            Toast.makeText(this, "Could not start APK download: " + (error.message ?: "unknown error"), Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun requestInstallDownloadedApk(uri: Uri) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+            android.app.AlertDialog.Builder(this)
+                .setTitle("Allow APK installation")
+                .setMessage("Android needs permission to install updates downloaded inside this app. Enable Allow from this source, then return and tap UPDATE APK again.")
+                .setPositiveButton("Settings") { _, _ ->
+                    startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + packageName)))
+                }
+                .setNegativeButton("Later", null)
+                .show()
+            return
+        }
+        val install = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try { startActivity(install) }
+        catch (error: Exception) {
+            Toast.makeText(this, "Android could not open installer: " + (error.message ?: "unknown error"), Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun openUrl(input: String) {

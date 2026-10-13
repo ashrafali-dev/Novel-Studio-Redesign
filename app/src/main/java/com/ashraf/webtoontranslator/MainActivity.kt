@@ -357,36 +357,12 @@ class MainActivity : Activity() {
 (function() {
   var token = __TOKEN__;
   var sleep = function(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); };
-  // Some comic sites scroll an inner container instead of window/document.
-  var findScroller = function() {
-    var root = document.scrollingElement || document.documentElement;
-    var best = root, bestRange = Math.max(0, root.scrollHeight - root.clientHeight);
-    var nodes = document.querySelectorAll('body *');
-    for (var i = 0; i < nodes.length; i++) {
-      var el = nodes[i], st;
-      try { st = getComputedStyle(el); } catch (e) { continue; }
-      if (!/(auto|scroll)/.test(st.overflowY)) continue;
-      var range = el.scrollHeight - el.clientHeight;
-      if (range > bestRange + 100 && el.clientHeight > 150) { best = el; bestRange = range; }
-    }
-    return best;
-  };
-  var scroller = findScroller();
-  var isWindowScroller = scroller === document.scrollingElement ||
-    scroller === document.documentElement || scroller === document.body;
-  var getTop = function() { return isWindowScroller ? (window.scrollY || scroller.scrollTop || 0) : scroller.scrollTop; };
-  var setTop = function(value) {
-    if (isWindowScroller) window.scrollTo(0, value);
-    else scroller.scrollTop = value;
-  };
-  var getHeight = function() { return isWindowScroller ? pageHeight() : scroller.scrollHeight; };
-  var getViewport = function() { return isWindowScroller ? (window.innerHeight || 600) : scroller.clientHeight; };
   var pageHeight = function() {
     return Math.max(document.documentElement ? document.documentElement.scrollHeight : 0,
       document.body ? document.body.scrollHeight : 0, document.documentElement ? document.documentElement.clientHeight : 0);
   };
-  var viewport = Math.max(getViewport(), 300);
-  var stepSize = Math.max(280, Math.floor(viewport * 0.72));
+  var viewport = Math.max(window.innerHeight || 600, 400);
+  var stepSize = Math.max(320, Math.floor(viewport * 0.78));
   var y = 0, stable = 0, steps = 0, previousHeight = -1, previousLoaded = -1;
   var maxSteps = 420;
   var collectLoadedCount = function() {
@@ -394,16 +370,15 @@ class MainActivity : Activity() {
   };
   var walk = async function() {
     try {
-      setTop(0);
-      await sleep(400);
+      window.scrollTo(0, 0);
+      await sleep(250);
       while (steps < maxSteps) {
-        viewport = Math.max(getViewport(), 300);
-        var height = getHeight();
+        var height = pageHeight();
         var bottom = Math.max(0, height - viewport);
-        y = Math.min(Math.max(getTop(), y) + stepSize, bottom);
-        setTop(y);
+        y = Math.min(y + stepSize, bottom);
+        window.scrollTo(0, y);
         await sleep(220);
-        var nextHeight = getHeight();
+        var nextHeight = pageHeight();
         var loaded = collectLoadedCount();
         var atBottom = y >= Math.max(0, nextHeight - viewport - 12);
         if (atBottom && nextHeight === previousHeight && loaded === previousLoaded) stable++;
@@ -416,7 +391,7 @@ class MainActivity : Activity() {
         }
         if (atBottom && stable >= 4) break;
       }
-      setTop(getHeight());
+      window.scrollTo(0, pageHeight());
       await sleep(550);
       var imgs = Array.prototype.slice.call(document.images);
       imgs.forEach(function(img) { img.removeAttribute('data-webtoon-ocr-index'); });
@@ -428,27 +403,20 @@ class MainActivity : Activity() {
         var height = img.naturalHeight || 0;
         var rect = img.getBoundingClientRect();
         var style = window.getComputedStyle(img);
-        // Exclude unloaded assets, tiny thumbnails/icons, and hidden decorative images.
-        // Keep smaller real comic panels too (some Webtoon assets are 240x254).
-        if (!src || !img.complete || width < 160 || height < 130 || width * height < 35000) return;
-        if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0 ||
-            rect.width < 20 || rect.height < 20) return;
-        if (!/^(https?:|data:image\\/|blob:)/i.test(src)) return;
-        var absoluteSrc;
-        try { absoluteSrc = new URL(src, document.baseURI).href; } catch (e) { return; }
-        if (seenSources[absoluteSrc]) return;
-        seenSources[absoluteSrc] = true;
+        if (!src || width < 160 || height < 130 || width * height < 35000) return;
+        if (style.display === 'none' || style.visibility === 'hidden' || rect.width < 20 || rect.height < 20) return;
+        if (!/^(https?:|data:image\/|blob:)/i.test(src)) return;
         var index = chapterImages.length;
         img.setAttribute('data-webtoon-ocr-index', String(index));
         chapterImages.push({
           index: index,
-          url: absoluteSrc,
+          url: new URL(src, document.baseURI).href,
           width: width,
           height: height,
           alt: img.alt || ''
         });
       });
-      setTop(0);
+      window.scrollTo(0, 0);
       await sleep(350);
       if (window.WebtoonBridge) {
         window.WebtoonBridge.onChapterImages(token, JSON.stringify({

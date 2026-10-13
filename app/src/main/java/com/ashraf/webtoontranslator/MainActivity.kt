@@ -565,11 +565,25 @@ class MainActivity : Activity() {
                     val outcome = try {
                         val bitmap = downloadBitmap(info.url, pageUrl, userAgent)
                         try {
-                            val textResult = Tasks.await(
+                            // Run OCR on the original first, then retry a cleaned/upscaled copy
+                            // when the source is a long webtoon panel and ML Kit finds no text.
+                            var textResult = Tasks.await(
                                 recognizer.process(InputImage.fromBitmap(bitmap, 0)),
                                 60,
                                 TimeUnit.SECONDS
                             )
+                            if (textResult.text.isBlank()) {
+                                val retryBitmap = prepareOcrRetryBitmap(bitmap)
+                                try {
+                                    textResult = Tasks.await(
+                                        recognizer.process(InputImage.fromBitmap(retryBitmap, 0)),
+                                        60,
+                                        TimeUnit.SECONDS
+                                    )
+                                } finally {
+                                    if (retryBitmap !== bitmap) retryBitmap.recycle()
+                                }
+                            }
                             ImageOutcome(info, extractLines(info.index, textResult, bitmap.width, bitmap.height), null)
                         } finally {
                             bitmap.recycle()
@@ -749,6 +763,26 @@ class MainActivity : Activity() {
         2 -> TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build())
         3 -> TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())
         else -> TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+    }
+
+    private fun prepareOcrRetryBitmap(source: Bitmap): Bitmap {
+        val maxSide = max(source.width, source.height)
+        val scale = if (maxSide < 2200) minOf(2f, 2200f / maxSide) else 1f
+        val width = (source.width * scale).toInt().coerceAtLeast(1)
+        val height = (source.height * scale).toInt().coerceAtLeast(1)
+        val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(output)
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG)
+        // Slight contrast lift makes thin speech-bubble lettering easier to recognize.
+        val matrix = android.graphics.ColorMatrix().apply { set(floatArrayOf(
+            1.18f, 0f, 0f, 0f, -12f,
+            0f, 1.18f, 0f, 0f, -12f,
+            0f, 0f, 1.18f, 0f, -12f,
+            0f, 0f, 0f, 1f, 0f
+        )) }
+        paint.colorFilter = android.graphics.ColorMatrixColorFilter(matrix)
+        canvas.drawBitmap(source, null, android.graphics.Rect(0, 0, width, height), paint)
+        return output
     }
 
     private fun extractLines(imageIndex: Int, result: Text, bitmapWidth: Int, bitmapHeight: Int): List<OcrLine> {

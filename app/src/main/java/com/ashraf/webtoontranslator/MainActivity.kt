@@ -394,6 +394,7 @@ class MainActivity : Activity() {
       window.scrollTo(0, pageHeight());
       await sleep(550);
       var imgs = Array.prototype.slice.call(document.images);
+      imgs.forEach(function(img) { img.removeAttribute('data-webtoon-ocr-index'); });
       var chapterImages = [];
       var seenSources = Object.create(null);
       imgs.forEach(function(img) {

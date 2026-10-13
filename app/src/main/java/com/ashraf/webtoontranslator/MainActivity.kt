@@ -66,6 +66,8 @@ class MainActivity : Activity() {
     private lateinit var statusLabel: TextView
     private lateinit var imageCountLabel: TextView
     private lateinit var resultText: TextView
+    private lateinit var chatWebView: WebView
+    private lateinit var chatToggleButton: Button
 
     private val worker: ExecutorService = Executors.newSingleThreadExecutor()
     private val scanSequence = AtomicInteger(0)
@@ -299,6 +301,19 @@ class MainActivity : Activity() {
         resultsHeader.addView(copyButton, LinearLayout.LayoutParams(-2, dp(31)).apply {
             leftMargin = dp(6)
         })
+        chatToggleButton = Button(this).apply {
+            text = "ChatGPT"
+            isAllCaps = false
+            textSize = 10f
+            setTextColor(TEXT)
+            background = rounded(SURFACE, 9, BORDER)
+            setPadding(dp(5), 0, dp(5), 0)
+            setOnClickListener {
+                chatWebView.visibility = if (chatWebView.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+                chatToggleButton.text = if (chatWebView.visibility == View.VISIBLE) "Hide chat" else "ChatGPT"
+            }
+        }
+        resultsHeader.addView(chatToggleButton, LinearLayout.LayoutParams(-2, dp(31)).apply { leftMargin = dp(4) })
         root.addView(resultsHeader, LinearLayout.LayoutParams(-1, dp(37)))
 
         val resultScroll = ScrollView(this).apply {
@@ -314,7 +329,20 @@ class MainActivity : Activity() {
             setPadding(dp(10), dp(8), dp(10), dp(10))
         }
         resultScroll.addView(resultText, ViewGroup.LayoutParams(-1, -2))
-        root.addView(resultScroll, LinearLayout.LayoutParams(-1, 0, 0.32f))
+        chatWebView = WebView(this).apply {
+            setBackgroundColor(Color.WHITE)
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.loadsImagesAutomatically = true
+            webChromeClient = WebChromeClient()
+            webViewClient = WebViewClient()
+            visibility = View.GONE
+            loadUrl("https://chatgpt.com/")
+        }
+        val bottomPanel = FrameLayout(this)
+        bottomPanel.addView(resultScroll, FrameLayout.LayoutParams(-1, -1))
+        bottomPanel.addView(chatWebView, FrameLayout.LayoutParams(-1, -1))
+        root.addView(bottomPanel, LinearLayout.LayoutParams(-1, 0, 0.32f))
         setContentView(root)
     }
 

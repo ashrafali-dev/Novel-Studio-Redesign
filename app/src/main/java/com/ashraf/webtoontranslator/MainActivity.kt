@@ -487,7 +487,7 @@ class MainActivity : Activity() {
   Array.prototype.slice.call(document.images).forEach(function(img){
    var src=img.currentSrc||img.src||img.getAttribute('data-src')||img.getAttribute('data-original')||'';
    var w=img.naturalWidth||0,h=img.naturalHeight||0,rect=img.getBoundingClientRect(),st=getComputedStyle(img);
-   if(!src||w<80||h<80||w*h<12000||st.display==='none'||st.visibility==='hidden'||rect.width<10||rect.height<10||!/^(https?:|data:image\\/|blob:)/i.test(src))return;
+   if(!src||w<80||h<80||w*h<12000||st.display==='none'||st.visibility==='hidden'||rect.width<10||rect.height<10||!/^(https?:|data:image\/|blob:)/i.test(src))return;
    var key=src.split('#')[0];if(seen[key]===undefined)seen[key]=nextIndex++;
    var ix=seen[key];img.setAttribute('data-webtoon-ocr-index',String(ix));
    list.push({index:ix,url:new URL(src,document.baseURI).href,width:w,height:h,alt:img.alt||''});

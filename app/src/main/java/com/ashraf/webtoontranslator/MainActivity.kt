@@ -85,6 +85,7 @@ class MainActivity : Activity() {
     private val translatedBatches = java.util.TreeMap<Int, String>()
     private var nextBatch = 0
     private var sendingBatch = false
+    private var chatBaselineCount = 0
     private val translationPrompt = "Translate the following OCR lines into natural, fluent Bengali. Preserve line IDs and order exactly. Do not omit or summarize."
 
     private var scanPageUrl: String = ""
@@ -642,13 +643,19 @@ class MainActivity : Activity() {
         runOnUiThread {
             statusLabel.text = "Sending translation batch " + (index + 1) + " to chatbot…"
         }
-        chatWebView.evaluateJavascript(chatSendScript(payload)) { raw ->
+        chatWebView.evaluateJavascript(
+            "(function(){return document.querySelectorAll('[data-message-author-role=assistant],.model-response-text,[class*=response-content]').length;})()"
+        ) { baselineRaw ->
             if (token != activeScanToken) return@evaluateJavascript
-            if (decodeJsResult(raw) != "SENT") {
-                synchronized(translationBatches) { sendingBatch = false }
-                runOnUiThread { toast("Chat input not found. Sign in to ChatGPT in the ChatGPT panel.") }
-            } else {
-                pollChatBatch(token, index, System.currentTimeMillis(), "", 0)
+            chatBaselineCount = baselineRaw?.trim()?.toIntOrNull() ?: 0
+            chatWebView.evaluateJavascript(chatSendScript(payload)) { raw ->
+                if (token != activeScanToken) return@evaluateJavascript
+                if (decodeJsResult(raw) != "SENT") {
+                    synchronized(translationBatches) { sendingBatch = false }
+                    runOnUiThread { toast("Chat input not found. Open the Chatbot panel and sign in first.") }
+                } else {
+                    pollChatBatch(token, index, System.currentTimeMillis(), "", 0, chatBaselineCount)
+                }
             }
         }
     }
@@ -658,16 +665,18 @@ class MainActivity : Activity() {
         return "(function(){var t=" + value + ";var b=document.querySelector('#prompt-textarea')||document.querySelector('div[contenteditable=true]')||document.querySelector('textarea');if(!b)return 'NOBOX';b.focus();if(b.tagName==='TEXTAREA'){b.value=t;b.dispatchEvent(new Event('input',{bubbles:true}));}else{b.innerHTML='';var p=document.createElement('p');p.textContent=t;b.appendChild(p);b.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:t}));}setTimeout(function(){var x=document.querySelector('button[data-testid=send-button]')||document.querySelector('button[aria-label*=Send]');if(x&&!x.disabled)x.click();else b.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));},250);return 'SENT';})()"
     }
 
-    private fun pollChatBatch(token: Int, index: Int, started: Long, previous: String, stable: Int) {
+    private fun pollChatBatch(token: Int, index: Int, started: Long, previous: String, stable: Int, baselineCount: Int) {
         android.os.Handler(mainLooper).postDelayed({
             if (token != activeScanToken) return@postDelayed
-            chatWebView.evaluateJavascript("(function(){var a=document.querySelectorAll('[data-message-author-role=assistant],.model-response-text,.response-container message-content,[class*=response-content]');var n=a.length?a[a.length-1]:null;var busy=!!document.querySelector('button[data-testid=stop-button],button[aria-label*=Stop],button[aria-label*=Stop]');return JSON.stringify({text:n?(n.innerText||''):'',busy:busy});})()") { raw ->
+            chatWebView.evaluateJavascript("(function(){var a=document.querySelectorAll('[data-message-author-role=assistant],.model-response-text,.response-container message-content,[class*=response-content],model-response');var n=a.length>a.length?null:(a.length?a[a.length-1]:null);var busy=!!document.querySelector('button[data-testid=stop-button],button[aria-label*=Stop],button[aria-label*=stop]');return JSON.stringify({text:n?(n.innerText||''):'',busy:busy,count:a.length});})()") { raw ->
                 if (token != activeScanToken) return@evaluateJavascript
                 val obj = runCatching { JSONObject(decodeJsResult(raw)) }.getOrNull()
                 val reply = obj?.optString("text").orEmpty().trim()
                 val busy = obj?.optBoolean("busy", false) ?: false
-                val stableNow = if (reply.isNotBlank() && reply == previous && !busy) stable + 1 else 0
-                if (reply.isNotBlank() && !busy && stableNow >= 3 && System.currentTimeMillis() - started > 3000) {
+                val replyCount = obj?.optInt("count", 0) ?: 0
+                val isNewReply = replyCount > baselineCount
+                val stableNow = if (isNewReply && reply.isNotBlank() && reply == previous && !busy) stable + 1 else 0
+                if (isNewReply && reply.isNotBlank() && !busy && stableNow >= 3 && System.currentTimeMillis() - started > 3000) {
                     synchronized(translationBatches) {
                         translatedBatches[index] = reply
                         sendingBatch = false
@@ -679,14 +688,40 @@ class MainActivity : Activity() {
                             }
                         }
                         statusLabel.text = "Translated " + translatedBatches.size + " batches · waiting for next OCR batch"
+                        showTranslationOnReader()
                     }
                     sendNextBatchIfAny(token)
                 } else if (System.currentTimeMillis() - started > 180000) {
                     synchronized(translationBatches) { sendingBatch = false }
                     runOnUiThread { toast("ChatGPT reply timed out. Check the chat panel.") }
-                } else pollChatBatch(token, index, started, reply, stableNow)
+                } else pollChatBatch(token, index, started, reply, stableNow, baselineCount)
             }
         }, 1200)
+    }
+
+    private fun showTranslationOnReader() {
+        val translated = synchronized(translationBatches) {
+            translatedBatches.entries.joinToString("\n\n") { entry ->
+                "— Batch " + (entry.key + 1) + " —\n" + entry.value
+            }
+        }
+        val quoted = JSONObject.quote(translated)
+        val script = """
+(function(){
+  var id='__webtoon_translator_translation__';
+  var old=document.getElementById(id);
+  if(old)old.remove();
+  var panel=document.createElement('section');panel.id=id;
+  panel.style.cssText='position:fixed;left:8px;right:8px;bottom:8px;max-height:45vh;overflow:auto;z-index:2147483647;background:#101827;color:#f8fafc;border:1px solid #64748b;border-radius:12px;box-shadow:0 4px 24px #0008;padding:12px;font:16px/1.65 sans-serif;white-space:pre-wrap;overflow-wrap:anywhere;';
+  var head=document.createElement('div');head.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;font-weight:bold;';
+  var title=document.createElement('span');title.textContent='বাংলা অনুবাদ';
+  var close=document.createElement('button');close.textContent='×';close.style.cssText='font-size:22px;border:0;border-radius:8px;padding:2px 12px;background:#334155;color:white;';
+  close.onclick=function(){panel.remove();};
+  head.appendChild(title);head.appendChild(close);
+  var body=document.createElement('div');body.textContent=$quoted;
+  panel.appendChild(head);panel.appendChild(body);document.body.appendChild(panel);
+})();""".trimIndent()
+        webView.evaluateJavascript(script, null)
     }
 
     private fun sendNextBatchIfAny(token: Int) {

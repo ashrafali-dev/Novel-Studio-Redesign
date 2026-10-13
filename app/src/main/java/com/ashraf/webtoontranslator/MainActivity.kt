@@ -97,7 +97,7 @@ class MainActivity : Activity() {
     private val processedImageIndices = mutableSetOf<Int>()
     private var ocrWorkerRunning = false
     private var imageCollectionComplete = false
-    private val translationPrompt = "Translate the following OCR lines into natural, fluent Bengali. Preserve line IDs and order exactly. Do not omit or summarize."
+    private val translationPrompt = "Translate every OCR line into natural, fluent Bengali. CRITICAL FORMAT: output exactly one line per input line, preserving each [L###] ID exactly once at the start of its translated line. Never remove, renumber, merge, split, reorder, explain, or summarize any line. Output only the translated lines with their IDs."
 
     private var scanPageUrl: String = ""
     private var currentRecognizer: TextRecognizer? = null
@@ -682,7 +682,7 @@ class MainActivity : Activity() {
                         translatedBatches[index] = reply
                         sendingBatch = false
                     }
-                    val idPattern = Regex("(?m)^\\\\[L(\\\\d{3,})\\\\]\\\\s*(.*)$")
+                    val idPattern = Regex("(?m)^\\[L(\\d{3,})\\]\\s*(.*)$")
                     idPattern.findAll(reply).forEach { match ->
                         val lineId = match.groupValues[1].toIntOrNull()
                         val translatedText = match.groupValues[2].trim()

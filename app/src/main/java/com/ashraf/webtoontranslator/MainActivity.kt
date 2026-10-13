@@ -654,12 +654,65 @@ class MainActivity : Activity() {
         }
         val payload = translationPrompt + "\n\nTranslate batch " + (index + 1) +
             ". Preserve every line ID exactly once.\n\n" + batch
-        scannerWebView.evaluateJavascript("void(0)", null)
         runOnUiThread {
-            statusLabel.text = "OCR ready: batch " + (index + 1) + " queued. Chatbot WebView integration pending."
-            synchronized(translationBatches) { sendingBatch = false }
+            chatWebView.visibility = View.VISIBLE
+            chatToggleButton.text = "Hide chat"
+            statusLabel.text = "Sending translation batch " + (index + 1) + " to ChatGPT…"
+        }
+        chatWebView.evaluateJavascript(chatSendScript(payload)) { raw ->
+            if (token != activeScanToken) return@evaluateJavascript
+            if (decodeJsResult(raw) != "SENT") {
+                synchronized(translationBatches) { sendingBatch = false }
+                runOnUiThread { toast("Chat input not found. Sign in to ChatGPT in the ChatGPT panel.") }
+            } else {
+                pollChatBatch(token, index, System.currentTimeMillis(), "", 0)
+            }
         }
     }
+
+    private fun chatSendScript(message: String): String {
+        val value = JSONObject.quote(message)
+        return "(function(){var t=" + value + ";var b=document.querySelector('#prompt-textarea')||document.querySelector('div[contenteditable=true]')||document.querySelector('textarea');if(!b)return 'NOBOX';b.focus();if(b.tagName==='TEXTAREA'){b.value=t;b.dispatchEvent(new Event('input',{bubbles:true}));}else{b.innerHTML='';var p=document.createElement('p');p.textContent=t;b.appendChild(p);b.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:t}));}setTimeout(function(){var x=document.querySelector('button[data-testid=send-button]')||document.querySelector('button[aria-label*=Send]');if(x&&!x.disabled)x.click();else b.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));},250);return 'SENT';})()"
+    }
+
+    private fun pollChatBatch(token: Int, index: Int, started: Long, previous: String, stable: Int) {
+        android.os.Handler(mainLooper).postDelayed({
+            if (token != activeScanToken) return@postDelayed
+            chatWebView.evaluateJavascript("(function(){var a=document.querySelectorAll('[data-message-author-role=assistant]');var n=a.length?a[a.length-1]:null;var busy=!!document.querySelector('button[data-testid=stop-button],button[aria-label*=Stop]');return JSON.stringify({text:n?(n.innerText||''):'',busy:busy});})()") { raw ->
+                if (token != activeScanToken) return@evaluateJavascript
+                val obj = runCatching { JSONObject(decodeJsResult(raw)) }.getOrNull()
+                val reply = obj?.optString("text").orEmpty().trim()
+                val busy = obj?.optBoolean("busy", false) ?: false
+                val stableNow = if (reply.isNotBlank() && reply == previous && !busy) stable + 1 else 0
+                if (reply.isNotBlank() && !busy && stableNow >= 3 && System.currentTimeMillis() - started > 3000) {
+                    synchronized(translationBatches) {
+                        translatedBatches[index] = reply
+                        sendingBatch = false
+                    }
+                    runOnUiThread {
+                        resultText.text = synchronized(translationBatches) {
+                            translatedBatches.entries.joinToString("\\n\\n") { entry ->
+                                "=== BATCH " + (entry.key + 1) + " ===\\n" + entry.value
+                            }
+                        }
+                        statusLabel.text = "Translated " + translatedBatches.size + " batches · waiting for next OCR batch"
+                    }
+                    sendNextBatchIfAny(token)
+                } else if (System.currentTimeMillis() - started > 180000) {
+                    synchronized(translationBatches) { sendingBatch = false }
+                    runOnUiThread { toast("ChatGPT reply timed out. Check the chat panel.") }
+                } else pollChatBatch(token, index, started, reply, stableNow)
+            }
+        }, 1200)
+    }
+
+    private fun sendNextBatchIfAny(token: Int) {
+        sendNextTranslationBatch(token)
+    }
+
+    private fun decodeJsResult(raw: String?): String =
+        if (raw.isNullOrBlank() || raw == "null") "" else
+            runCatching { org.json.JSONTokener(raw).nextValue().toString() }.getOrDefault("")
 
     private fun createRecognizer(script: Int): TextRecognizer = when (script) {
         1 -> TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())

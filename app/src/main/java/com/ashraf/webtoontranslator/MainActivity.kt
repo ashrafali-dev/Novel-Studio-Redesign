@@ -15,6 +15,7 @@ import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Environment
 import android.provider.Settings
+import android.util.Log
 import android.os.Bundle
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
@@ -57,6 +58,7 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.math.abs
 import kotlin.math.max
 
 class MainActivity : Activity() {
@@ -496,7 +498,9 @@ class MainActivity : Activity() {
    if(!src||w<80||h<80||w*h<12000||st.display==='none'||st.visibility==='hidden'||rect.width<10||rect.height<10||!/^(https?:|data:image\/|blob:)/i.test(src))return;
    var key=src.split('#')[0];if(seen[key]===undefined)seen[key]=nextIndex++;
    var ix=seen[key];img.setAttribute('data-webtoon-ocr-index',String(ix));
-   list.push({index:ix,url:new URL(src,document.baseURI).href,width:w,height:h,alt:img.alt||''});
+   var lz=img.getAttribute('data-src')||img.getAttribute('data-original')||img.getAttribute('data-lazy-src')||'';
+   var lzDiff=false;try{lzDiff=!!lz&&new URL(lz,document.baseURI).href!==new URL(src,document.baseURI).href;}catch(e){}
+   list.push({index:ix,url:new URL(src,document.baseURI).href,width:w,height:h,alt:img.alt||'',complete:!!img.complete,lazyDiffers:lzDiff});
   });list.sort(function(a,b){return a.index-b.index;});return list;
  };
  var send=function(done){if(window.WebtoonBridge)try{window.WebtoonBridge.onChapterImages(token,JSON.stringify({pageUrl:location.href,pageTitle:document.title||'',steps:steps,truncated:steps>=maxSteps,collectionComplete:!!done,totalDomImages:document.images.length,loadedImages:loaded(),images:collect()}));}catch(e){}};
@@ -524,7 +528,8 @@ class MainActivity : Activity() {
             val url = item.optString("url").trim()
             if (url.isBlank()) continue
             list.add(ImageInfo(item.optInt("index", i), url, item.optInt("width", 0),
-                item.optInt("height", 0), item.optString("alt", "")))
+                item.optInt("height", 0), item.optString("alt", ""),
+                item.optBoolean("complete", true), item.optBoolean("lazyDiffers", false)))
         }
         return list
     }
@@ -538,6 +543,7 @@ class MainActivity : Activity() {
         currentRecognizer = recognizer
         val userAgent = webView.settings.userAgentString.ifBlank { "Mozilla/5.0 Android WebtoonTranslator" }
         val pageUrl = scanPageUrl
+        val scriptLabel = scriptNames.getOrElse(scriptSpinner.selectedItemPosition) { "unknown" }
         worker.execute {
             try {
                 while (isCurrentScan(token)) {
@@ -555,18 +561,30 @@ class MainActivity : Activity() {
                         if (synchronized(ocrQueueLock) { imageCollectionComplete && pendingOcrImages.isEmpty() } || !isCurrentScan(token)) break
                         continue
                     }
+                    var stage = "download/decode"
+                    var decoded: DecodedImage? = null
+                    var primaryCount = 0
+                    var retryCount: Int? = null
                     val outcome = try {
-                        val bitmap = downloadBitmap(info.url, pageUrl, userAgent)
+                        val fetched = downloadBitmap(info.url, pageUrl, userAgent)
+                        decoded = fetched
+                        val bitmap = fetched.bitmap
+                        stage = "ocr"
                         try {
                             var result = Tasks.await(recognizer.process(InputImage.fromBitmap(bitmap, 0)), 60, TimeUnit.SECONDS)
                             var bestLines = extractLines(info.index, result, bitmap.width, bitmap.height)
+                            primaryCount = bestLines.size
                             // Webtoon panels often contain small lettering. Retry blank/near-blank
                             // images at a larger scale with stronger contrast, and keep the best result.
                             if (bestLines.size < 2) {
                                 val retry = prepareOcrRetryBitmap(bitmap)
                                 try {
                                     val retryResult = Tasks.await(recognizer.process(InputImage.fromBitmap(retry, 0)), 60, TimeUnit.SECONDS)
+                                    // Boxes are normalized against the retry bitmap they were measured on;
+                                    // the retry is a uniform scale of the original, so the fractions are
+                                    // identical in the original image's coordinate space.
                                     val retryLines = extractLines(info.index, retryResult, retry.width, retry.height)
+                                    retryCount = retryLines.size
                                     if (retryLines.size > bestLines.size || retryResult.text.length > result.text.length) {
                                         result = retryResult
                                         bestLines = retryLines
@@ -575,9 +593,14 @@ class MainActivity : Activity() {
                                     if (retry !== bitmap) retry.recycle()
                                 }
                             }
-                            ImageOutcome(info, bestLines, null)
+                            ImageOutcome(info, bestLines, null, buildDiag(decoded, scriptLabel, primaryCount, retryCount, "ok"))
                         } finally { bitmap.recycle() }
-                    } catch (error: Exception) { ImageOutcome(info, emptyList(), readableError(error)) }
+                    } catch (error: Exception) {
+                        ImageOutcome(info, emptyList(), readableError(error), buildDiag(decoded, scriptLabel, primaryCount, retryCount, stage))
+                    } catch (error: OutOfMemoryError) {
+                        ImageOutcome(info, emptyList(), "Out of memory while handling this image", buildDiag(decoded, scriptLabel, primaryCount, retryCount, stage))
+                    }
+                    logImageDiagnostics(outcome)
                     val snapshot = synchronized(ocrQueueLock) {
                         val map = currentOutcomes.associateBy { it.info.index }.toMutableMap()
                         map[outcome.info.index] = outcome
@@ -599,6 +622,7 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     if (isCurrentScan(token)) {
                         val all = currentOutcomes
+                        Log.i(LOG_TAG, diagnosticSummary(all))
                         val ok = all.count { it.error == null }
                         val count = all.sumOf { it.lines.size }
                         val failed = all.count { it.error != null }
@@ -822,7 +846,7 @@ class MainActivity : Activity() {
         return all.sortedWith(compareBy<OcrLine> { it.top }.thenBy { it.left })
     }
 
-    private fun downloadBitmap(imageUrl: String, pageUrl: String, userAgent: String): Bitmap {
+    private fun downloadBitmap(imageUrl: String, pageUrl: String, userAgent: String): DecodedImage {
         val bytes = if (imageUrl.startsWith("data:image/", ignoreCase = true)) {
             decodeDataUrl(imageUrl)
         } else {
@@ -865,8 +889,9 @@ class MainActivity : Activity() {
             inSampleSize = sample
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
-        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+        val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
             ?: throw IOException("Android could not decode this image format.")
+        return DecodedImage(decoded, bounds.outWidth, bounds.outHeight, decoded.width, decoded.height, sample, bytes.size)
     }
 
     private fun decodeDataUrl(dataUrl: String): ByteArray {
@@ -893,6 +918,76 @@ class MainActivity : Activity() {
             output.write(buffer, 0, count)
         }
         return output.toByteArray()
+    }
+
+    private fun buildDiag(decoded: DecodedImage?, script: String, primary: Int, retry: Int?, stage: String): OcrDiag =
+        OcrDiag(
+            sourceWidth = decoded?.sourceWidth ?: 0, sourceHeight = decoded?.sourceHeight ?: 0,
+            bitmapWidth = decoded?.bitmapWidth ?: 0, bitmapHeight = decoded?.bitmapHeight ?: 0,
+            sampleSize = decoded?.sampleSize ?: 0, bytes = decoded?.bytes ?: 0,
+            script = script, primaryLines = primary, retryLines = retry, stage = stage
+        )
+
+    // Host plus the last two path segments only: no query string, fragment, credentials or cookies.
+    private fun safeUrlForLog(url: String): String {
+        if (url.startsWith("data:", ignoreCase = true)) return "data-url(" + url.length + " chars)"
+        if (url.startsWith("blob:", ignoreCase = true)) return "blob-url"
+        return try {
+            val parsed = URL(url)
+            val tail = (parsed.path ?: "").split('/').filter { it.isNotBlank() }.takeLast(2).joinToString("/").take(60)
+            parsed.host + "/…/" + tail
+        } catch (_: Exception) {
+            "unparseable-url"
+        }
+    }
+
+    private fun fileDiffersFromPage(outcome: ImageOutcome): Boolean {
+        val d = outcome.diag ?: return false
+        val info = outcome.info
+        return d.sourceWidth > 0 && info.width > 0 &&
+            (abs(d.sourceWidth - info.width) > 2 || abs(d.sourceHeight - info.height) > 2)
+    }
+
+    private fun describeDiagnostics(outcome: ImageOutcome): String {
+        val info = outcome.info
+        val d = outcome.diag ?: return "no diagnostics"
+        val sb = StringBuilder()
+        sb.append("page ").append(info.width).append("×").append(info.height)
+        if (d.sourceWidth > 0) {
+            sb.append(" · file ").append(d.sourceWidth).append("×").append(d.sourceHeight)
+            sb.append(" · OCR input ").append(d.bitmapWidth).append("×").append(d.bitmapHeight)
+            if (d.sampleSize > 1) sb.append(" (÷").append(d.sampleSize).append(")")
+            sb.append(" · ").append(d.bytes / 1024).append(" KB")
+        } else {
+            sb.append(" · file n/a")
+        }
+        sb.append(" · ").append(d.script).append(" · pass1 ").append(d.primaryLines)
+        d.retryLines?.let { sb.append(" · retry ").append(it) }
+        sb.append(" · stage ").append(d.stage)
+        if (fileDiffersFromPage(outcome)) sb.append(" · WARN file size differs from page size")
+        if (!info.complete) sb.append(" · WARN not fully loaded when captured")
+        if (info.lazyDiffers) sb.append(" · WARN page has a different lazy-load source")
+        sb.append("\n  url ").append(safeUrlForLog(info.url))
+        return sb.toString()
+    }
+
+    private fun diagnosticSummary(outcomes: List<ImageOutcome>): String {
+        val widths = outcomes.mapNotNull { it.diag?.bitmapWidth?.takeIf { w -> w > 0 } }
+        return "DIAGNOSTICS · " + outcomes.size + " images · " +
+            outcomes.count { it.lines.isNotEmpty() } + " with text · " +
+            outcomes.count { it.error == null && it.lines.isEmpty() } + " no text · " +
+            outcomes.count { it.error != null } + " errors · " +
+            outcomes.count { fileDiffersFromPage(it) } + " file≠page size · " +
+            outcomes.count { (it.diag?.sampleSize ?: 0) > 1 } + " downscaled · " +
+            outcomes.count { !it.info.complete } + " not loaded at capture · " +
+            outcomes.count { it.info.lazyDiffers } + " lazy-src differs" +
+            if (widths.isNotEmpty()) " · OCR input width " + widths.min() + "–" + widths.max() + " px" else ""
+    }
+
+    private fun logImageDiagnostics(outcome: ImageOutcome) {
+        val line = "image#" + outcome.info.index + " " + describeDiagnostics(outcome).replace("\n", "") +
+            (outcome.error?.let { " · error: $it" } ?: "") + " · lines " + outcome.lines.size
+        if (outcome.error != null) Log.w(LOG_TAG, line) else Log.i(LOG_TAG, line)
     }
 
     private fun readableError(error: Throwable): String {
@@ -933,9 +1028,11 @@ class MainActivity : Activity() {
         if (currentOutcomes.isEmpty()) {
             buffer.append("OCR lines will appear here once image processing starts.")
         } else {
+            buffer.append(diagnosticSummary(currentOutcomes)).append("\n\n")
             currentOutcomes.forEachIndexed { outcomeIndex, outcome ->
                 buffer.append("IMAGE ").append(outcome.info.index + 1)
                     .append("  ·  ").append(outcome.info.width).append("×").append(outcome.info.height).append('\n')
+                buffer.append("  ").append(describeDiagnostics(outcome)).append('\n')
                 if (!outcome.error.isNullOrBlank()) {
                     buffer.append("  ERROR: ").append(outcome.error).append('\n')
                 } else if (outcome.lines.isEmpty()) {
@@ -959,10 +1056,10 @@ class MainActivity : Activity() {
 
     private fun copyOcr() {
         val text = currentOutcomes.joinToString("\n\n") { outcome ->
-            val heading = "IMAGE " + (outcome.info.index + 1)
+            val heading = "IMAGE " + (outcome.info.index + 1) + "\n" + describeDiagnostics(outcome)
             if (!outcome.error.isNullOrBlank()) heading + "\n[ERROR] " + outcome.error
             else heading + "\n" + outcome.lines.joinToString("\n") { it.text }
-        }
+        }.let { if (currentOutcomes.isEmpty()) it else diagnosticSummary(currentOutcomes) + "\n\n" + it }
         if (text.isBlank()) {
             toast("No OCR result to copy.")
             return
@@ -1196,7 +1293,33 @@ class MainActivity : Activity() {
         val url: String,
         val width: Int,
         val height: Int,
-        val alt: String
+        val alt: String,
+        // Diagnostic-only flags reported by the page scanner at capture time.
+        val complete: Boolean = true,
+        val lazyDiffers: Boolean = false
+    )
+
+    private data class DecodedImage(
+        val bitmap: Bitmap,
+        val sourceWidth: Int,
+        val sourceHeight: Int,
+        val bitmapWidth: Int,
+        val bitmapHeight: Int,
+        val sampleSize: Int,
+        val bytes: Int
+    )
+
+    private data class OcrDiag(
+        val sourceWidth: Int,
+        val sourceHeight: Int,
+        val bitmapWidth: Int,
+        val bitmapHeight: Int,
+        val sampleSize: Int,
+        val bytes: Int,
+        val script: String,
+        val primaryLines: Int,
+        val retryLines: Int?,
+        val stage: String
     )
 
     private data class OcrLine(
@@ -1211,7 +1334,8 @@ class MainActivity : Activity() {
     private data class ImageOutcome(
         val info: ImageInfo,
         val lines: List<OcrLine>,
-        val error: String?
+        val error: String?,
+        val diag: OcrDiag? = null
     )
 
     private fun buildOverlayHelperScript(): String = """
@@ -1257,6 +1381,7 @@ class MainActivity : Activity() {
         const val MAX_IMAGE_BYTES = 24 * 1024 * 1024
         const val MAX_BITMAP_DIMENSION = 4096
         const val MAX_DIAGNOSTIC_BOXES = 2500
+        const val LOG_TAG = "WebtoonOcr"
 
         val CANVAS = Color.rgb(13, 17, 26)
         val PANEL = Color.rgb(20, 26, 38)

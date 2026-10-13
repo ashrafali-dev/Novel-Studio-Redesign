@@ -404,9 +404,10 @@ class MainActivity : Activity() {
         var rect = img.getBoundingClientRect();
         var style = window.getComputedStyle(img);
         // Exclude unloaded assets, tiny thumbnails/icons, and hidden decorative images.
-        if (!src || !img.complete || width < 300 || height < 300 || width * height < 100000) return;
+        // Keep smaller real comic panels too (some Webtoon assets are 240x254).
+        if (!src || !img.complete || width < 160 || height < 130 || width * height < 35000) return;
         if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0 ||
-            rect.width < 80 || rect.height < 80) return;
+            rect.width < 20 || rect.height < 20) return;
         if (!/^(https?:|data:image\\/|blob:)/i.test(src)) return;
         var absoluteSrc;
         try { absoluteSrc = new URL(src, document.baseURI).href; } catch (e) { return; }

@@ -19,6 +19,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.view.Gravity
+import android.widget.FrameLayout
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.ArrayAdapter
@@ -56,6 +57,9 @@ import kotlin.math.max
 class MainActivity : Activity() {
     private lateinit var addressBar: EditText
     private lateinit var webView: WebView
+    private lateinit var scannerWebView: WebView
+    private lateinit var webFrame: FrameLayout
+    private lateinit var splitButton: Button
     private lateinit var scriptSpinner: Spinner
     private lateinit var scanButton: Button
     private lateinit var progressBar: ProgressBar
@@ -70,6 +74,8 @@ class MainActivity : Activity() {
     @Volatile private var activeScanToken: Int = 0
     @Volatile private var scanPageGeneration: Int = -1
     @Volatile private var scanInProgress: Boolean = false
+    @Volatile private var scannerLoadPending: Boolean = false
+    private var splitViewEnabled: Boolean = false
 
     private var scanPageUrl: String = ""
     private var currentRecognizer: TextRecognizer? = null
@@ -210,6 +216,16 @@ class MainActivity : Activity() {
             setOnClickListener { scanChapter() }
         }
         actionRow.addView(scanButton, LinearLayout.LayoutParams(-2, dp(42)))
+        splitButton = Button(this).apply {
+            text = "Split view"
+            isAllCaps = false
+            textSize = 10f
+            setTextColor(TEXT)
+            background = rounded(SURFACE, 10, BORDER)
+            setPadding(dp(5), 0, dp(5), 0)
+            setOnClickListener { toggleSplitView() }
+        }
+        actionRow.addView(splitButton, LinearLayout.LayoutParams(-2, dp(42)).apply { leftMargin = dp(5) })
         root.addView(actionRow, LinearLayout.LayoutParams(-1, dp(46)))
 
         progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
@@ -229,52 +245,23 @@ class MainActivity : Activity() {
         }
         root.addView(statusLabel, LinearLayout.LayoutParams(-1, -2))
 
-        webView = WebView(this).apply {
-            setBackgroundColor(Color.WHITE)
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            settings.loadsImagesAutomatically = true
-            settings.blockNetworkImage = false
-            settings.javaScriptCanOpenWindowsAutomatically = false
-            settings.allowFileAccess = false
-            settings.allowContentAccess = false
-            settings.setSupportMultipleWindows(false)
-            CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-            addJavascriptInterface(bridge, "WebtoonBridge")
-            webChromeClient = WebChromeClient()
-            webViewClient = object : WebViewClient() {
-                override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                    super.onPageStarted(view, url, favicon)
-                    pageGeneration += 1
-                    if (scanInProgress) cancelScan("Page changed; previous scan cancelled.")
-                    view?.evaluateJavascript(
-                        "window.__WebtoonTranslator&&window.__WebtoonTranslator.clearBoxes&&window.__WebtoonTranslator.clearBoxes();",
-                        null
-                    )
-                    statusLabel.text = "Opening chapter page…"
-                    progressBar.progress = 0
-                    url?.let { addressBar.setText(it) }
-                }
-
-                override fun onPageFinished(view: WebView?, url: String?) {
-                    super.onPageFinished(view, url)
-                    url?.let { addressBar.setText(it) }
-                    view?.evaluateJavascript(buildOverlayHelperScript(), null)
-                    if (!scanInProgress) statusLabel.text = "Page loaded · choose script and scan chapter."
-                }
-
-                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                    val target = request?.url ?: return false
-                    return target.scheme !in listOf("http", "https")
-                }
-            }
+        webView = createBrowserWebView(false)
+        scannerWebView = createBrowserWebView(true)
+        webFrame = FrameLayout(this).apply {
+            background = rounded(Color.WHITE, 12, BORDER)
+            clipToOutline = true
         }
+        webFrame.addView(webView, FrameLayout.LayoutParams(-1, -1))
+        webFrame.addView(scannerWebView, FrameLayout.LayoutParams(-1, -1).apply { gravity = Gravity.TOP })
+        scannerWebView.alpha = 0f
+        scannerWebView.isClickable = false
+        scannerWebView.importantForAccessibility = ViewGroup.IMPORTANT_FOR_ACCESSIBILITY_NO
         val readerCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = rounded(Color.WHITE, 12, BORDER)
             clipToOutline = true
         }
-        readerCard.addView(webView, LinearLayout.LayoutParams(-1, -1))
+        readerCard.addView(webFrame, LinearLayout.LayoutParams(-1, -1))
         root.addView(readerCard, LinearLayout.LayoutParams(-1, 0, 0.68f))
 
         val resultsHeader = LinearLayout(this).apply {
@@ -350,7 +337,83 @@ class MainActivity : Activity() {
         imageCountLabel.text = "Collecting images…"
         resultText.text = "Scrolling the chapter to trigger lazy-loaded panels…"
         statusLabel.text = "Scanning chapter from top to bottom · keep this page open."
-        webView.evaluateJavascript(buildCollectionScript(token), null)
+        if (scannerWebView.url != scanPageUrl) {
+            scannerLoadPending = true
+            statusLabel.text = "Opening a separate chapter copy for background scanning…"
+            scannerWebView.loadUrl(scanPageUrl)
+        } else {
+            startCollection(token)
+        }
+    }
+
+    private fun startCollection(token: Int) {
+        if (!isCurrentScan(token)) return
+        scannerWebView.evaluateJavascript(buildCollectionScript(token), null)
+    }
+
+    private fun toggleSplitView() {
+        splitViewEnabled = !splitViewEnabled
+        splitButton.text = if (splitViewEnabled) "Hide split" else "Split view"
+        val width = webFrame.width.takeIf { it > 0 } ?: -1
+        val height = webFrame.height.takeIf { it > 0 } ?: dp(560)
+        if (splitViewEnabled) {
+            val readerHeight = (height * 0.58f).toInt()
+            webView.layoutParams = FrameLayout.LayoutParams(width, readerHeight, Gravity.TOP)
+            scannerWebView.layoutParams = FrameLayout.LayoutParams(width, height - readerHeight, Gravity.TOP).apply { topMargin = readerHeight }
+            scannerWebView.alpha = 1f
+            scannerWebView.isClickable = true
+            statusLabel.text = "Split view · top is the reader, bottom is the scanner copy."
+        } else {
+            webView.layoutParams = FrameLayout.LayoutParams(-1, -1, Gravity.TOP)
+            scannerWebView.layoutParams = FrameLayout.LayoutParams(-1, -1, Gravity.TOP)
+            scannerWebView.alpha = 0f
+            scannerWebView.isClickable = false
+            statusLabel.text = if (scanInProgress) "Background scan running…" else "Reader view · scanner runs separately."
+        }
+    }
+
+    private fun createBrowserWebView(isScanner: Boolean): WebView = WebView(this).apply {
+        setBackgroundColor(Color.WHITE)
+        settings.javaScriptEnabled = true
+        settings.domStorageEnabled = true
+        settings.loadsImagesAutomatically = true
+        settings.blockNetworkImage = false
+        settings.javaScriptCanOpenWindowsAutomatically = false
+        settings.allowFileAccess = false
+        settings.allowContentAccess = false
+        settings.setSupportMultipleWindows(false)
+        CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+        if (isScanner) addJavascriptInterface(bridge, "WebtoonBridge")
+        webChromeClient = WebChromeClient()
+        webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                super.onPageStarted(view, url, favicon)
+                if (!isScanner) {
+                    pageGeneration += 1
+                    if (scanInProgress) cancelScan("Reader page changed; previous scan cancelled.")
+                    statusLabel.text = "Opening chapter page…"
+                    progressBar.progress = 0
+                    url?.let { addressBar.setText(it) }
+                }
+            }
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                if (!isScanner) {
+                    url?.let { addressBar.setText(it) }
+                    if (!scanInProgress) statusLabel.text = "Page loaded · choose script and scan chapter."
+                } else {
+                    view?.evaluateJavascript(buildOverlayHelperScript(), null)
+                    if (scannerLoadPending) {
+                        scannerLoadPending = false
+                        startCollection(activeScanToken)
+                    }
+                }
+            }
+            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                val target = request?.url ?: return false
+                return target.scheme !in listOf("http", "https")
+            }
+        }
     }
 
     private fun buildCollectionScript(token: Int): String = """
@@ -644,7 +707,7 @@ class MainActivity : Activity() {
             if (count >= MAX_DIAGNOSTIC_BOXES) break
         }
         val payload = JSONObject.quote(boxes.toString())
-        webView.evaluateJavascript(
+        scannerWebView.evaluateJavascript(
             "(function(){if(window.__WebtoonTranslator&&window.__WebtoonTranslator.drawBoxes){" +
                 "window.__WebtoonTranslator.drawBoxes(JSON.parse(" + payload + "));}})();",
             null
@@ -704,7 +767,7 @@ class MainActivity : Activity() {
         scriptSpinner.isEnabled = true
         statusLabel.text = message
         if (currentImages.isEmpty()) imageCountLabel.text = "No images"
-        if (::webView.isInitialized) webView.evaluateJavascript(
+        if (::scannerWebView.isInitialized) scannerWebView.evaluateJavascript(
             "window.__WebtoonTranslator&&window.__WebtoonTranslator.scrollToTop&&window.__WebtoonTranslator.scrollToTop();",
             null
         )
@@ -786,9 +849,13 @@ class MainActivity : Activity() {
         currentRecognizer = null
         worker.shutdownNow()
         if (::webView.isInitialized) {
-            webView.removeJavascriptInterface("WebtoonBridge")
             webView.stopLoading()
             webView.destroy()
+        }
+        if (::scannerWebView.isInitialized) {
+            scannerWebView.removeJavascriptInterface("WebtoonBridge")
+            scannerWebView.stopLoading()
+            scannerWebView.destroy()
         }
         super.onDestroy()
     }

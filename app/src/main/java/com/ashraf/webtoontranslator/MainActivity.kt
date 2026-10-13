@@ -76,6 +76,11 @@ class MainActivity : Activity() {
     @Volatile private var scanInProgress: Boolean = false
     @Volatile private var scannerLoadPending: Boolean = false
     private var splitViewEnabled: Boolean = false
+    private val translationBatches = java.util.TreeMap<Int, String>()
+    private val translatedBatches = java.util.TreeMap<Int, String>()
+    private var nextBatch = 0
+    private var sendingBatch = false
+    private val translationPrompt = "Translate the following OCR lines into natural, fluent Bengali. Preserve line IDs and order exactly. Do not omit or summarize."
 
     private var scanPageUrl: String = ""
     private var currentRecognizer: TextRecognizer? = null

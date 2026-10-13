@@ -602,7 +602,14 @@ class MainActivity : Activity() {
 
     private fun queueTranslationBatches(token: Int, outcomes: List<ImageOutcome>, final: Boolean) {
         if (token != activeScanToken) return
-        val lines = outcomes.sortedBy { it.info.index }.flatMap { it.lines }
+        val orderedOutcomes = outcomes.sortedBy { it.info.index }
+        val lines = orderedOutcomes.flatMap { it.lines }
+        synchronized(ocrQueueLock) {
+            ocrLineCatalog.clear()
+            ocrImageCatalog.clear()
+            orderedOutcomes.forEach { ocrImageCatalog[it.info.index] = it.info }
+            lines.forEachIndexed { i, line -> ocrLineCatalog[i + 1] = line }
+        }
         synchronized(translationBatches) {
             while ((nextBatch + 1) * 50 <= lines.size) {
                 val start = nextBatch * 50
@@ -675,6 +682,14 @@ class MainActivity : Activity() {
                         translatedBatches[index] = reply
                         sendingBatch = false
                     }
+                    val idPattern = Regex("(?m)^\\\\[L(\\\\d{3,})\\\\]\\\\s*(.*)$")
+                    idPattern.findAll(reply).forEach { match ->
+                        val lineId = match.groupValues[1].toIntOrNull()
+                        val translatedText = match.groupValues[2].trim()
+                        if (lineId != null && translatedText.isNotBlank()) synchronized(ocrQueueLock) {
+                            translatedLineTexts[lineId] = translatedText
+                        }
+                    }
                     runOnUiThread {
                         resultText.text = synchronized(translationBatches) {
                             translatedBatches.entries.joinToString("\\n\\n") { entry ->
@@ -694,27 +709,48 @@ class MainActivity : Activity() {
     }
 
     private fun showTranslationOnReader() {
-        val translated = synchronized(translationBatches) {
-            translatedBatches.entries.joinToString("\n\n") { entry ->
-                "— Batch " + (entry.key + 1) + " —\n" + entry.value
+        val items = JSONArray()
+        synchronized(ocrQueueLock) {
+            translatedLineTexts.forEach { (lineId, translated) ->
+                val line = ocrLineCatalog[lineId] ?: return@forEach
+                val image = ocrImageCatalog[line.imageIndex] ?: currentImages.firstOrNull { it.index == line.imageIndex } ?: return@forEach
+                items.put(JSONObject()
+                    .put("url", image.url)
+                    .put("imageIndex", line.imageIndex)
+                    .put("left", line.left.toDouble()).put("top", line.top.toDouble())
+                    .put("right", line.right.toDouble()).put("bottom", line.bottom.toDouble())
+                    .put("text", translated).put("lineId", lineId))
             }
         }
-        val quoted = JSONObject.quote(translated)
+        val payload = JSONObject.quote(items.toString())
         val script = """
 (function(){
-  var id='__webtoon_translator_translation__';
-  var old=document.getElementById(id);
-  if(old)old.remove();
-  var panel=document.createElement('section');panel.id=id;
-  panel.style.cssText='position:fixed;left:8px;right:8px;bottom:8px;max-height:45vh;overflow:auto;z-index:2147483647;background:#101827;color:#f8fafc;border:1px solid #64748b;border-radius:12px;box-shadow:0 4px 24px #0008;padding:12px;font:16px/1.65 sans-serif;white-space:pre-wrap;overflow-wrap:anywhere;';
-  var head=document.createElement('div');head.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;font-weight:bold;';
-  var title=document.createElement('span');title.textContent='বাংলা অনুবাদ';
-  var close=document.createElement('button');close.textContent='×';close.style.cssText='font-size:22px;border:0;border-radius:8px;padding:2px 12px;background:#334155;color:white;';
-  close.onclick=function(){panel.remove();};
-  head.appendChild(title);head.appendChild(close);
-  var body=document.createElement('div');body.textContent=$quoted;
-  panel.appendChild(head);panel.appendChild(body);document.body.appendChild(panel);
-})();""".trimIndent()
+ var data=JSON.parse($payload);
+ var id='__webtoon_translated_lines__',old=document.getElementById(id);if(old)old.remove();
+ var layer=document.createElement('div');layer.id=id;
+ layer.style.cssText='position:absolute;left:0;top:0;width:100%;z-index:2147483646;pointer-events:none;overflow:visible;';
+ document.body.appendChild(layer);
+ var norm=function(s){try{var u=new URL(s,document.baseURI);u.hash='';return u.href;}catch(e){return s||'';}};
+ data.forEach(function(item){
+  var target=norm(item.url),img=null;
+  Array.prototype.some.call(document.images,function(candidate){
+   if(norm(candidate.currentSrc||candidate.src)===target){img=candidate;return true;}return false;
+  });
+  if(!img)return;
+  var rect=img.getBoundingClientRect();if(rect.width<1||rect.height<1)return;
+  var box=document.createElement('div');
+  box.textContent=item.text;
+  box.setAttribute('data-line-id',item.lineId);
+  box.style.cssText='position:absolute;box-sizing:border-box;overflow:hidden;display:flex;align-items:center;justify-content:center;text-align:center;white-space:normal;overflow-wrap:anywhere;line-height:1.25;font:600 13px/1.25 sans-serif;color:#111827;background:rgba(255,255,255,.97);border:1px solid rgba(30,41,59,.75);border-radius:3px;padding:1px 2px;pointer-events:none;';
+  box.style.left=(rect.left+window.scrollX+item.left*rect.width)+'px';
+  box.style.top=(rect.top+window.scrollY+item.top*rect.height)+'px';
+  box.style.width=Math.max(8,(item.right-item.left)*rect.width)+'px';
+  box.style.height=Math.max(8,(item.bottom-item.top)*rect.height)+'px';
+  box.style.fontSize=Math.max(8,Math.min(16,rect.width*(item.right-item.left)*.16))+'px';
+  layer.appendChild(box);
+ });
+})();
+""".trimIndent()
         webView.evaluateJavascript(script, null)
     }
 

@@ -475,93 +475,38 @@ class MainActivity : Activity() {
     }
 
     private fun buildCollectionScript(token: Int): String = """
-(function() {
-  var token = __TOKEN__;
-  var sleep = function(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); };
-  var pageHeight = function() {
-    return Math.max(document.documentElement ? document.documentElement.scrollHeight : 0,
-      document.body ? document.body.scrollHeight : 0, document.documentElement ? document.documentElement.clientHeight : 0);
-  };
-  var viewport = Math.max(window.innerHeight || 600, 400);
-  var stepSize = Math.max(320, Math.floor(viewport * 0.78));
-  var y = 0, stable = 0, steps = 0, previousHeight = -1, previousLoaded = -1;
-  var maxSteps = 180;
-  var collectLoadedCount = function() {
-    return Array.prototype.filter.call(document.images, function(img) { return img.complete && img.naturalWidth > 0; }).length;
-  };
-  var walk = async function() {
-    try {
-      window.scrollTo(0, 0);
-      await sleep(120);
-      while (steps < maxSteps) {
-        var height = pageHeight();
-        var bottom = Math.max(0, height - viewport);
-        y = Math.min(y + stepSize, bottom);
-        window.scrollTo(0, y);
-        await sleep(100);
-        var nextHeight = pageHeight();
-        var loaded = collectLoadedCount();
-        var atBottom = y >= Math.max(0, nextHeight - viewport - 12);
-        if (atBottom && nextHeight === previousHeight && loaded === previousLoaded) stable++;
-        else stable = 0;
-        previousHeight = nextHeight;
-        previousLoaded = loaded;
-        steps++;
-        if (steps % 4 === 0 && window.WebtoonBridge) {
-          try { window.WebtoonBridge.onScrollProgress(token, steps, loaded, nextHeight); } catch (e) {}
-        }
-        if (atBottom && stable >= 3) break;
-      }
-      window.scrollTo(0, pageHeight());
-      await sleep(350);
-      var imgs = Array.prototype.slice.call(document.images);
-      imgs.forEach(function(img) { img.removeAttribute('data-webtoon-ocr-index'); });
-      var chapterImages = [];
-      var seenSources = Object.create(null);
-      imgs.forEach(function(img) {
-        var src = img.currentSrc || img.src || '';
-        var width = img.naturalWidth || 0;
-        var height = img.naturalHeight || 0;
-        var rect = img.getBoundingClientRect();
-        var style = window.getComputedStyle(img);
-        if (!src || width < 80 || height < 80 || width * height < 12000) return;
-        if (style.display === 'none' || style.visibility === 'hidden' || rect.width < 10 || rect.height < 10) return;
-        if (!/^(https?:|data:image\/|blob:)/i.test(src)) return;
-        var normalizedSrc = src.split('#')[0];
-        if (seenSources[normalizedSrc]) return;
-        seenSources[normalizedSrc] = true;
-        var index = chapterImages.length;
-        img.setAttribute('data-webtoon-ocr-index', String(index));
-        chapterImages.push({
-          index: index,
-          url: new URL((img.getAttribute('data-src') || img.getAttribute('data-original') || img.currentSrc || img.src || src), document.baseURI).href,
-          width: width,
-          height: height,
-          alt: img.alt || ''
-        });
-      });
-      window.scrollTo(0, 0);
-      await sleep(350);
-      if (window.WebtoonBridge) {
-        window.WebtoonBridge.onChapterImages(token, JSON.stringify({
-          pageUrl: location.href,
-          pageTitle: document.title || '',
-          steps: steps,
-          truncated: steps >= maxSteps,
-          totalDomImages: document.images.length,
-          loadedImages: collectLoadedCount(),
-          images: chapterImages
-        }));
-      }
-    } catch (error) {
-      if (window.WebtoonBridge) {
-        window.WebtoonBridge.onChapterImages(token, JSON.stringify({
-          pageUrl: location.href, images: [], error: String(error)
-        }));
-      }
-    }
-  };
-  walk();
+(function(){
+ var token=__TOKEN__; if(window.__wtCollecting)return; window.__wtCollecting=true;
+ var sleep=function(ms){return new Promise(function(r){setTimeout(r,ms);});};
+ var pageHeight=function(){return Math.max(document.documentElement?document.documentElement.scrollHeight:0,document.body?document.body.scrollHeight:0,document.documentElement?document.documentElement.clientHeight:0);};
+ var viewport=Math.max(window.innerHeight||600,400),stepSize=Math.max(320,Math.floor(viewport*.78));
+ var y=0,stable=0,steps=0,prevH=-1,prevL=-1,maxSteps=180,seen=Object.create(null),nextIndex=0;
+ var loaded=function(){return Array.prototype.filter.call(document.images,function(i){return i.complete&&i.naturalWidth>0;}).length;};
+ var collect=function(){
+  var list=[];
+  Array.prototype.slice.call(document.images).forEach(function(img){
+   var src=img.currentSrc||img.src||img.getAttribute('data-src')||img.getAttribute('data-original')||'';
+   var w=img.naturalWidth||0,h=img.naturalHeight||0,rect=img.getBoundingClientRect(),st=getComputedStyle(img);
+   if(!src||w<80||h<80||w*h<12000||st.display==='none'||st.visibility==='hidden'||rect.width<10||rect.height<10||!/^(https?:|data:image\\/|blob:)/i.test(src))return;
+   var key=src.split('#')[0];if(seen[key]===undefined)seen[key]=nextIndex++;
+   var ix=seen[key];img.setAttribute('data-webtoon-ocr-index',String(ix));
+   list.push({index:ix,url:new URL(src,document.baseURI).href,width:w,height:h,alt:img.alt||''});
+  });list.sort(function(a,b){return a.index-b.index;});return list;
+ };
+ var send=function(done){if(window.WebtoonBridge)try{window.WebtoonBridge.onChapterImages(token,JSON.stringify({pageUrl:location.href,pageTitle:document.title||'',steps:steps,truncated:steps>=maxSteps,collectionComplete:!!done,totalDomImages:document.images.length,loadedImages:loaded(),images:collect()}));}catch(e){}};
+ (async function(){try{
+  window.scrollTo(0,0);await sleep(150);send(false);
+  while(steps<maxSteps){
+   var h=pageHeight(),bottom=Math.max(0,h-viewport);y=Math.min(y+stepSize,bottom);window.scrollTo(0,y);await sleep(140);
+   var nh=pageHeight(),nl=loaded(),atBottom=y>=Math.max(0,nh-viewport-12);
+   if(atBottom&&nh===prevH&&nl===prevL)stable++;else stable=0;
+   prevH=nh;prevL=nl;steps++;
+   if(steps%2===0)send(false);
+   if(steps%4===0&&window.WebtoonBridge)try{window.WebtoonBridge.onScrollProgress(token,steps,nl,nh);}catch(e){}
+   if(atBottom&&stable>=3)break;
+  }
+  send(true);window.__wtCollecting=false;
+ }catch(e){if(window.WebtoonBridge)window.WebtoonBridge.onChapterImages(token,JSON.stringify({pageUrl:location.href,images:[],collectionComplete:true,error:String(e)}));window.__wtCollecting=false;}})();
 })();
 """.trimIndent().replace("__TOKEN__", token.toString())
 

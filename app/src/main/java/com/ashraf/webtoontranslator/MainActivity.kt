@@ -295,6 +295,18 @@ class MainActivity : Activity() {
         val scanSiteButton = panelButton("Scanning site") { showBottomPanel(if (activeBottomPanel == "scanner") "" else "scanner") }
         panelButtons.addView(scanSiteButton, LinearLayout.LayoutParams(0, dp(34), 1f))
         root.addView(panelButtons, LinearLayout.LayoutParams(-1, dp(40)))
+        val resultInfoRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        imageCountLabel = TextView(this).apply {
+            text = "No scan yet"
+            textSize = 10f
+            setTextColor(MUTED)
+        }
+        resultInfoRow.addView(imageCountLabel, LinearLayout.LayoutParams(0, dp(27), 1f))
+        resultInfoRow.addView(panelButton("Copy OCR") { copyOcr() }, LinearLayout.LayoutParams(-2, dp(27)))
+        root.addView(resultInfoRow, LinearLayout.LayoutParams(-1, dp(29)))
 
         val resultScroll = ScrollView(this).apply {
             isFillViewport = true

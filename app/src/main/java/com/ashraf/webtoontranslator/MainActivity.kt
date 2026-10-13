@@ -417,13 +417,10 @@ class MainActivity : Activity() {
         resultText.text = "Scrolling the chapter to trigger lazy-loaded panels…"
         statusLabel.text = "Scanning chapter from top to bottom · keep this page open."
         showBottomPanel("")
-        if (scannerWebView.url != scanPageUrl) {
-            scannerLoadPending = true
-            statusLabel.text = "Opening a separate chapter copy for background scanning…"
-            scannerWebView.loadUrl(scanPageUrl)
-        } else {
-            startCollection(token)
-        }
+        // Collect from the actual reader WebView. Some chapter sites (including WebToons)
+        // render the real panels only in the active reader; a second hidden/off-screen
+        // WebView can show placeholders and return zero images.
+        startCollection(token)
     }
 
     private fun startCollection(token: Int) {
@@ -449,7 +446,7 @@ class MainActivity : Activity() {
         settings.allowContentAccess = false
         settings.setSupportMultipleWindows(false)
         CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-        if (isScanner) addJavascriptInterface(bridge, "WebtoonBridge")
+        addJavascriptInterface(bridge, "WebtoonBridge")
         webChromeClient = WebChromeClient()
         webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {

@@ -395,20 +395,27 @@ class MainActivity : Activity() {
       await sleep(550);
       var imgs = Array.prototype.slice.call(document.images);
       var chapterImages = [];
+      var seenSources = Object.create(null);
       imgs.forEach(function(img) {
         var src = img.currentSrc || img.src || '';
         var width = img.naturalWidth || 0;
         var height = img.naturalHeight || 0;
         var rect = img.getBoundingClientRect();
         var style = window.getComputedStyle(img);
-        if (!src || width < 160 || height < 130 || width * height < 35000) return;
-        if (style.display === 'none' || style.visibility === 'hidden' || rect.width < 20 || rect.height < 20) return;
-        if (!/^(https?:|data:image\/|blob:)/i.test(src)) return;
+        // Exclude unloaded assets, tiny thumbnails/icons, and hidden decorative images.
+        if (!src || !img.complete || width < 300 || height < 300 || width * height < 100000) return;
+        if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0 ||
+            rect.width < 80 || rect.height < 80) return;
+        if (!/^(https?:|data:image\\/|blob:)/i.test(src)) return;
+        var absoluteSrc;
+        try { absoluteSrc = new URL(src, document.baseURI).href; } catch (e) { return; }
+        if (seenSources[absoluteSrc]) return;
+        seenSources[absoluteSrc] = true;
         var index = chapterImages.length;
         img.setAttribute('data-webtoon-ocr-index', String(index));
         chapterImages.push({
           index: index,
-          url: new URL(src, document.baseURI).href,
+          url: absoluteSrc,
           width: width,
           height: height,
           alt: img.alt || ''

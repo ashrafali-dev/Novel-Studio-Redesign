@@ -484,7 +484,7 @@ class MainActivity : Activity() {
 
     private fun buildCollectionScript(token: Int): String = """
 (function(){
- var token=__TOKEN__; if(window.__wtCollecting)return; window.__wtCollecting=true;
+ var token=__TOKEN__; if(window.__wtCollecting && window.__wtCollectToken===token)return; window.__wtCollecting=true; window.__wtCollectToken=token;
  var sleep=function(ms){return new Promise(function(r){setTimeout(r,ms);});};
  var pageHeight=function(){return Math.max(document.documentElement?document.documentElement.scrollHeight:0,document.body?document.body.scrollHeight:0,document.documentElement?document.documentElement.clientHeight:0);};
  var viewport=Math.max(window.innerHeight||600,400),stepSize=Math.max(320,Math.floor(viewport*.78));
@@ -493,12 +493,14 @@ class MainActivity : Activity() {
  var collect=function(){
   var list=[];
   Array.prototype.slice.call(document.images).forEach(function(img){
-   var src=img.currentSrc||img.src||img.getAttribute('data-src')||img.getAttribute('data-original')||'';
+   var lazy=img.getAttribute('data-src')||img.getAttribute('data-original')||img.getAttribute('data-lazy-src')||img.getAttribute('data-url')||'';
+   var src=img.currentSrc||lazy||img.src||'';
    var w=img.naturalWidth||0,h=img.naturalHeight||0,rect=img.getBoundingClientRect(),st=getComputedStyle(img);
-   if(!src||w<80||h<80||w*h<12000||st.display==='none'||st.visibility==='hidden'||rect.width<10||rect.height<10||!/^(https?:|data:image\/|blob:)/i.test(src))return;
+   var hasNaturalSize=w>=80&&h>=80&&w*h>=12000,hasLazySource=!!lazy;
+   if(!src||(!hasNaturalSize&&!hasLazySource)||st.display==='none'||st.visibility==='hidden'||rect.width<10||rect.height<10||!/^(https?:|data:image\\/|blob:)/i.test(src))return;
    var key=src.split('#')[0];if(seen[key]===undefined)seen[key]=nextIndex++;
    var ix=seen[key];img.setAttribute('data-webtoon-ocr-index',String(ix));
-   var lz=img.getAttribute('data-src')||img.getAttribute('data-original')||img.getAttribute('data-lazy-src')||'';
+   var lz=lazy;
    var lzDiff=false;try{lzDiff=!!lz&&new URL(lz,document.baseURI).href!==new URL(src,document.baseURI).href;}catch(e){}
    list.push({index:ix,url:new URL(src,document.baseURI).href,width:w,height:h,alt:img.alt||'',complete:!!img.complete,lazyDiffers:lzDiff});
   });list.sort(function(a,b){return a.index-b.index;});return list;
@@ -506,7 +508,7 @@ class MainActivity : Activity() {
  var send=function(done){if(window.WebtoonBridge)try{window.WebtoonBridge.onChapterImages(token,JSON.stringify({pageUrl:location.href,pageTitle:document.title||'',steps:steps,truncated:steps>=maxSteps,collectionComplete:!!done,totalDomImages:document.images.length,loadedImages:loaded(),images:collect()}));}catch(e){}};
  (async function(){try{
   window.scrollTo(0,0);await sleep(150);send(false);
-  while(steps<maxSteps){
+  while(steps<maxSteps && window.__wtCollectToken===token){
    var h=pageHeight(),bottom=Math.max(0,h-viewport);y=Math.min(y+stepSize,bottom);window.scrollTo(0,y);await sleep(140);
    var nh=pageHeight(),nl=loaded(),atBottom=y>=Math.max(0,nh-viewport-12);
    if(atBottom&&nh===prevH&&nl===prevL)stable++;else stable=0;
@@ -515,7 +517,7 @@ class MainActivity : Activity() {
    if(steps%4===0&&window.WebtoonBridge)try{window.WebtoonBridge.onScrollProgress(token,steps,nl,nh);}catch(e){}
    if(atBottom&&stable>=3)break;
   }
-  send(true);window.__wtCollecting=false;
+  if(window.__wtCollectToken===token){send(true);window.__wtCollecting=false;}
  }catch(e){if(window.WebtoonBridge)window.WebtoonBridge.onChapterImages(token,JSON.stringify({pageUrl:location.href,images:[],collectionComplete:true,error:String(e)}));window.__wtCollecting=false;}})();
 })();
 """.trimIndent().replace("__TOKEN__", token.toString())

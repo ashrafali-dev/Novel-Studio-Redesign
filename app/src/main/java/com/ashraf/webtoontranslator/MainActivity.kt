@@ -69,6 +69,8 @@ class MainActivity : Activity() {
     private lateinit var resultText: TextView
     private lateinit var chatWebView: WebView
     private lateinit var chatToggleButton: Button
+    private lateinit var bottomPanel: FrameLayout
+    private var activeBottomPanel: String = ""
 
     private val worker: ExecutorService = Executors.newSingleThreadExecutor()
     private val scanSequence = AtomicInteger(0)
@@ -259,78 +261,46 @@ class MainActivity : Activity() {
             background = rounded(Color.WHITE, 12, BORDER)
             clipToOutline = true
         }
+        // The reader is the only WebView covering the reading area.
+        // The scanner is hosted in the lower panel, never layered over the reader.
         webFrame.addView(webView, FrameLayout.LayoutParams(-1, -1))
-        webFrame.addView(scannerWebView, FrameLayout.LayoutParams(-1, -1).apply { gravity = Gravity.TOP })
-        scannerWebView.alpha = 0f
-        scannerWebView.isClickable = false
-        scannerWebView.importantForAccessibility = ViewGroup.IMPORTANT_FOR_ACCESSIBILITY_NO
         val readerCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = rounded(Color.WHITE, 12, BORDER)
             clipToOutline = true
         }
         readerCard.addView(webFrame, LinearLayout.LayoutParams(-1, -1))
-        root.addView(readerCard, LinearLayout.LayoutParams(-1, 0, 0.68f))
+        root.addView(readerCard, LinearLayout.LayoutParams(-1, 0, 1f))
 
-        val resultsHeader = LinearLayout(this).apply {
+        val panelButtons = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(2), dp(5), dp(2), dp(3))
+            setPadding(0, dp(5), 0, dp(3))
         }
-        resultsHeader.addView(TextView(this).apply {
-            text = "OCR RESULTS"
-            textSize = 10f
-            typeface = Typeface.DEFAULT_BOLD
-            letterSpacing = 0.08f
-            setTextColor(SECONDARY)
-        }, LinearLayout.LayoutParams(0, -2, 1f))
-        imageCountLabel = TextView(this).apply {
-            text = "No scan yet"
-            textSize = 10f
-            setTextColor(MUTED)
-        }
-        resultsHeader.addView(imageCountLabel)
-        val copyButton = Button(this).apply {
-            text = "Copy"
-            isAllCaps = false
-            textSize = 10f
-            setTextColor(TEXT)
-            background = rounded(SURFACE, 9, BORDER)
-            setPadding(dp(10), 0, dp(10), 0)
-            setOnClickListener { copyOcr() }
-        }
-        resultsHeader.addView(copyButton, LinearLayout.LayoutParams(-2, dp(31)).apply {
-            leftMargin = dp(6)
-        })
-        chatToggleButton = Button(this).apply {
-            text = "ChatGPT"
-            isAllCaps = false
-            textSize = 10f
-            setTextColor(TEXT)
-            background = rounded(SURFACE, 9, BORDER)
-            setPadding(dp(5), 0, dp(5), 0)
-            setOnClickListener {
-                chatWebView.visibility = if (chatWebView.visibility == View.VISIBLE) View.GONE else View.VISIBLE
-                chatToggleButton.text = if (chatWebView.visibility == View.VISIBLE) "Hide chat" else "ChatGPT / Gemini"
+        fun panelButton(label: String, action: () -> Unit): Button =
+            Button(this).apply {
+                text = label
+                isAllCaps = false
+                textSize = 10f
+                setTextColor(TEXT)
+                background = rounded(SURFACE, 9, BORDER)
+                setPadding(dp(5), 0, dp(5), 0)
+                setOnClickListener { action() }
             }
-            setOnLongClickListener {
-                val gemini = chatWebView.url.orEmpty().contains("gemini.google.com")
-                chatWebView.loadUrl(if (gemini) "https://chatgpt.com/" else "https://gemini.google.com/app")
-                chatWebView.visibility = View.VISIBLE
-                chatToggleButton.text = if (gemini) "ChatGPT" else "Gemini"
-                toast(if (gemini) "Opening ChatGPT" else "Opening Gemini")
-                true
-            }
-        }
-        resultsHeader.addView(chatToggleButton, LinearLayout.LayoutParams(-2, dp(31)).apply { leftMargin = dp(4) })
-        root.addView(resultsHeader, LinearLayout.LayoutParams(-1, dp(37)))
+        val ocrPanelButton = panelButton("OCR result") { showBottomPanel("ocr") }
+        panelButtons.addView(ocrPanelButton, LinearLayout.LayoutParams(0, dp(34), 1f).apply { rightMargin = dp(4) })
+        chatToggleButton = panelButton("Chatbot") { showBottomPanel(if (activeBottomPanel == "chat") "" else "chat") }
+        panelButtons.addView(chatToggleButton, LinearLayout.LayoutParams(0, dp(34), 1f).apply { rightMargin = dp(4) })
+        val scanSiteButton = panelButton("Scanning site") { showBottomPanel(if (activeBottomPanel == "scanner") "" else "scanner") }
+        panelButtons.addView(scanSiteButton, LinearLayout.LayoutParams(0, dp(34), 1f))
+        root.addView(panelButtons, LinearLayout.LayoutParams(-1, dp(40)))
 
         val resultScroll = ScrollView(this).apply {
             isFillViewport = true
             background = rounded(PANEL, 10, BORDER)
         }
         resultText = TextView(this).apply {
-            text = "Recognized text will appear here, grouped by source image. Diagnostic boxes will be drawn over the chapter images."
+            text = "OCR lines will appear here when scanning starts."
             textSize = 12f
             setTextColor(TEXT)
             typeface = Typeface.MONOSPACE
@@ -348,11 +318,30 @@ class MainActivity : Activity() {
             visibility = View.GONE
             loadUrl("https://chatgpt.com/")
         }
-        val bottomPanel = FrameLayout(this)
+        scannerWebView.alpha = 1f
+        scannerWebView.isClickable = true
+        bottomPanel = FrameLayout(this).apply {
+            background = rounded(PANEL, 10, BORDER)
+            clipToOutline = true
+        }
         bottomPanel.addView(resultScroll, FrameLayout.LayoutParams(-1, -1))
         bottomPanel.addView(chatWebView, FrameLayout.LayoutParams(-1, -1))
-        root.addView(bottomPanel, LinearLayout.LayoutParams(-1, 0, 0.32f))
+        bottomPanel.addView(scannerWebView, FrameLayout.LayoutParams(-1, -1))
+        root.addView(bottomPanel, LinearLayout.LayoutParams(-1, dp(1)))
         setContentView(root)
+    }
+
+    private fun showBottomPanel(panel: String) {
+        activeBottomPanel = panel
+        val height = if (panel.isBlank()) dp(1) else dp(245)
+        bottomPanel.layoutParams = bottomPanel.layoutParams.apply { this.height = height }
+        resultText.parent?.let { (it as? View)?.visibility = if (panel == "ocr") View.VISIBLE else View.GONE }
+        // ScrollView is the direct parent of resultText.
+        val resultScroll = resultText.parent as? ScrollView
+        resultScroll?.visibility = if (panel == "ocr") View.VISIBLE else View.GONE
+        chatWebView.visibility = if (panel == "chat") View.VISIBLE else View.GONE
+        scannerWebView.visibility = if (panel == "scanner") View.VISIBLE else View.INVISIBLE
+        if (panel == "chat") chatToggleButton.text = "Hide chatbot" else chatToggleButton.text = "Chatbot"
     }
 
     private fun scanChapter() {
@@ -379,6 +368,7 @@ class MainActivity : Activity() {
         imageCountLabel.text = "Collecting images…"
         resultText.text = "Scrolling the chapter to trigger lazy-loaded panels…"
         statusLabel.text = "Scanning chapter from top to bottom · keep this page open."
+        showBottomPanel("")
         if (scannerWebView.url != scanPageUrl) {
             scannerLoadPending = true
             statusLabel.text = "Opening a separate chapter copy for background scanning…"
@@ -396,22 +386,8 @@ class MainActivity : Activity() {
     private fun toggleSplitView() {
         splitViewEnabled = !splitViewEnabled
         splitButton.text = if (splitViewEnabled) "Hide split" else "Split view"
-        val width = webFrame.width.takeIf { it > 0 } ?: -1
-        val height = webFrame.height.takeIf { it > 0 } ?: dp(560)
-        if (splitViewEnabled) {
-            val readerHeight = (height * 0.58f).toInt()
-            webView.layoutParams = FrameLayout.LayoutParams(width, readerHeight, Gravity.TOP)
-            scannerWebView.layoutParams = FrameLayout.LayoutParams(width, height - readerHeight, Gravity.TOP).apply { topMargin = readerHeight }
-            scannerWebView.alpha = 1f
-            scannerWebView.isClickable = true
-            statusLabel.text = "Split view · top is the reader, bottom is the scanner copy."
-        } else {
-            webView.layoutParams = FrameLayout.LayoutParams(-1, -1, Gravity.TOP)
-            scannerWebView.layoutParams = FrameLayout.LayoutParams(-1, -1, Gravity.TOP)
-            scannerWebView.alpha = 0f
-            scannerWebView.isClickable = false
-            statusLabel.text = if (scanInProgress) "Background scan running…" else "Reader view · scanner runs separately."
-        }
+        showBottomPanel(if (splitViewEnabled) "scanner" else "")
+        statusLabel.text = if (splitViewEnabled) "Scanning site panel opened below the reader." else if (scanInProgress) "Background scan running…" else "Full-page reader view."
     }
 
     private fun createBrowserWebView(isScanner: Boolean): WebView = WebView(this).apply {
@@ -664,9 +640,7 @@ class MainActivity : Activity() {
         val payload = translationPrompt + "\n\nTranslate batch " + (index + 1) +
             ". Preserve every line ID exactly once.\n\n" + batch
         runOnUiThread {
-            chatWebView.visibility = View.VISIBLE
-            chatToggleButton.text = "Hide chat"
-            statusLabel.text = "Sending translation batch " + (index + 1) + " to ChatGPT…"
+            statusLabel.text = "Sending translation batch " + (index + 1) + " to chatbot…"
         }
         chatWebView.evaluateJavascript(chatSendScript(payload)) { raw ->
             if (token != activeScanToken) return@evaluateJavascript

@@ -137,7 +137,7 @@ class MainActivity : Activity() {
                     parsed.forEach { if (!processedImageIndices.contains(it.index)) pendingOcrImages[it.index] = it }
                     if (complete) imageCollectionComplete = true
                     ocrQueueLock.notifyAll()
-                    currentImages = (currentImages + parsed).distinctBy { it.index }.sortedBy { it.index }
+                    currentImages = (currentImages.associateBy { it.index } + parsed.associateBy { it.index }).values.sortedBy { it.index }
                     if (!ocrWorkerRunning && (pendingOcrImages.isNotEmpty() || imageCollectionComplete)) {
                         ocrWorkerRunning = true
                         startNativeOcr(token)
